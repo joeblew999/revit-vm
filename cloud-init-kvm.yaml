@@ -1,0 +1,38 @@
+#cloud-config
+# KVM variant — the original spec. Requires the host to expose /dev/kvm
+# (nested virtualization). Hetzner Cloud does NOT support this on any tier;
+# use the QEMU variant (cloud-init-qemu.yaml) there. This file is for hosts
+# that DO expose KVM: Hetzner Dedicated Root Servers, other clouds' bare
+# metal SKUs (Vultr / OVH bare metal), or a local Linux KVM box.
+package_update: true
+packages:
+  - docker.io
+  - docker-compose
+
+runcmd:
+  # Storage for the Windows VM image (dockur writes the .qcow2 here)
+  - mkdir -p /root/windows_storage
+
+  # Shared workspace: anything dropped here appears inside Windows as
+  # \\host.lan\Data. Used for moving .rvt files, batch-processor job
+  # specs, installers, and outputs across the Mac↔Windows boundary.
+  # cloud-init stays minimal on purpose — Windows app installs are
+  # post-Windows-boot work, fetched on demand via `mise run software:fetch`.
+  - mkdir -p /root/windows_shared/installers
+  - mkdir -p /root/windows_shared/jobs
+  - mkdir -p /root/windows_shared/output
+
+  # Run the dockur/windows container with KVM acceleration. Native speed.
+  - >
+    docker run -d --name windows_batch_processor
+    -p 8006:8006
+    -p 3389:3389/tcp
+    -p 3389:3389/udp
+    --device=/dev/kvm
+    --cap-add NET_ADMIN
+    -e RAM_SIZE="12G"
+    -e CPU_CORES="6"
+    -v /root/windows_storage:/storage
+    -v /root/windows_shared:/data
+    --restart unless-stopped
+    dockurr/windows

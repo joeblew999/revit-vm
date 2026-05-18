@@ -1,0 +1,21 @@
+# Windows installers to stage in the VM's shared folder.
+#
+# Format per line: <output-filename> <space> <download-url>
+# Blank lines and lines starting with `#` are ignored.
+#
+# `mise run software:fetch` reads this file, SSHes into the VM, and curls
+# each entry into /root/windows_shared/installers/ on the host. The folder
+# is mounted into Windows as \\host.lan\Data\installers\ — you RDP in and
+# run them (or, eventually, an in-Windows batch script runs them silently).
+#
+# RULES:
+# - Only PUBLIC downloads here. Per-account auth'd installers (Revit,
+#   AutoCAD, Adobe CC, anything behind a sign-in) MUST be downloaded to
+#   your Mac and pushed up via `mise run workspace:push <installer.exe>`.
+# - Fetch is idempotent: already-present files are skipped. Editing this
+#   list and re-running `software:fetch` only downloads what's new.
+# - Pin a stable URL when possible (a release-tagged GitHub URL, not
+#   "latest"). Reduces surprise when an upstream pushes a breaking version.
+
+# Revit Batch Processor — free open-source orchestrator for headless Revit jobs.
+RevitBatchProcessor.zip https://github.com/bvn-architecture/RevitBatchProcessor/archive/refs/heads/master.zip

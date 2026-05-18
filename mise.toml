@@ -1,0 +1,305 @@
+# Tool versions are pinned through mise — entering this directory installs
+# them on demand. Same pattern as scrapers-catalogs/domains/trade-fairs.
+[tools]
+hcloud = "1.64.1"
+fnox = "1.19.0"
+
+# Server provisioning parameters. Tweak here, not in task bodies.
+[env]
+SERVER_NAME = "revit-batch-node"
+SERVER_TYPE = "cpx42"
+SERVER_IMAGE = "ubuntu-24.04"
+SERVER_LOCATION = "fsn1"
+# SSH key already uploaded to the Hetzner project via `hcloud ssh-key create`.
+# Passing it on every `vm:up*` task suppresses the emailed/printed root
+# password and enables `ssh root@<ip>` for in-VM debugging (cloud-init logs,
+# docker logs, etc.).
+SSH_KEY = "gedw99_hetzner"
+# Local SSH private key matching the Hetzner-side public key (SSH_KEY above).
+SSH_KEY_FILE = "~/.ssh/gedw99_hetzner"
+# Set this to the ISO date you started the Autodesk Revit trial — `mise run
+# trial:remind` uses it to print days remaining. Empty = no reminder.
+TRIAL_STARTED = ""
+# Override these in mise.local.toml (gitignored) — see mise.local.toml.example.
+# Empty here so committing the file doesn't ship anyone's per-account URL.
+REVIT_INSTALLER_URL = ""
+
+# ── deps ──────────────────────────────────────────────────────────────────
+[tasks."deps:check"]
+description = "Verify hcloud + fnox are present and HCLOUD_TOKEN is seeded in macOS keychain."
+run = '''
+command -v hcloud >/dev/null || { echo "hcloud missing — run: mise install"; exit 1; }
+command -v fnox   >/dev/null || { echo "fnox missing — run: mise install"; exit 1; }
+fnox get HCLOUD_TOKEN >/dev/null 2>&1 \
+  && echo "ok: hcloud $(hcloud version | awk '/^hcloud/ {print $2}'), HCLOUD_TOKEN present" \
+  || { echo "HCLOUD_TOKEN missing — run: mise run token:set"; exit 1; }
+'''
+
+# ── token ─────────────────────────────────────────────────────────────────
+[tasks."token:set"]
+description = "One-time: stash a Hetzner Cloud API token in macOS keychain via fnox. Prompts for hidden input. Token must have Read & Write on the target project (https://console.hetzner.cloud → project → Security → API tokens)."
+run = "fnox set -p keychain HCLOUD_TOKEN"
+
+# ── vm ────────────────────────────────────────────────────────────────────
+[tasks."vm:up"]
+description = "Provision the VM with the QEMU/TCG cloud-init (Hetzner-Cloud-safe, ~10x slower). Default — alias for `vm:up-qemu`."
+depends = ["vm:up-qemu"]
+
+[tasks."vm:up-qemu"]
+description = "Provision with cloud-init-qemu.yaml: forces dockur into TCG software emulation (`-e KVM=N`). Required on Hetzner Cloud (no nested virt on any tier). Works everywhere; slow."
+run = '''
+fnox exec -- hcloud server create \
+  --name "$SERVER_NAME" \
+  --type "$SERVER_TYPE" \
+  --image "$SERVER_IMAGE" \
+  --location "$SERVER_LOCATION" \
+  --ssh-key "$SSH_KEY" \
+  --user-data-from-file cloud-init-qemu.yaml
+'''
+
+[tasks."vm:up-kvm"]
+description = "Provision with cloud-init-kvm.yaml: passes --device=/dev/kvm to dockur for native-speed Windows. ONLY for hosts that expose /dev/kvm — Hetzner Dedicated Root Server, other clouds' bare-metal SKUs, local Linux KVM box. Will fail on Hetzner Cloud."
+run = '''
+fnox exec -- hcloud server create \
+  --name "$SERVER_NAME" \
+  --type "$SERVER_TYPE" \
+  --image "$SERVER_IMAGE" \
+  --location "$SERVER_LOCATION" \
+  --ssh-key "$SSH_KEY" \
+  --user-data-from-file cloud-init-kvm.yaml
+'''
+
+[tasks."vm:up-snap"]
+description = "Provision a new VM from the latest snapshot — Windows pre-installed, no cloud-init re-run, dockur container auto-restarts. Errors clearly if no snapshot exists."
+run = '''
+SNAP_ID=$(fnox exec -- hcloud image list --type snapshot -o json | jq -r 'sort_by(.created) | .[-1].id // empty')
+if [ -z "$SNAP_ID" ]; then
+  echo "No snapshots found — run \`mise run snapshot:create\` first (against a running VM)"
+  exit 1
+fi
+echo "provisioning $SERVER_NAME from snapshot $SNAP_ID"
+fnox exec -- hcloud server create \
+  --name "$SERVER_NAME" \
+  --type "$SERVER_TYPE" \
+  --image "$SNAP_ID" \
+  --location "$SERVER_LOCATION" \
+  --ssh-key "$SSH_KEY"
+'''
+
+[tasks."vm:down"]
+description = "Delete the VM. Storage volumes (if any are attached separately) survive — this only removes the compute instance. To preserve the Windows install across down/up cycles, run `mise run snapshot:create` BEFORE this, then `vm:up-snap` later."
+run = 'fnox exec -- hcloud server delete "$SERVER_NAME"'
+
+[tasks."vm:status"]
+description = "Describe the VM — IP, state, created-at. Returns non-zero if the server doesn't exist."
+run = 'fnox exec -- hcloud server describe "$SERVER_NAME"'
+
+[tasks."vm:ip"]
+description = "Print the VM's public IPv4."
+run = '''fnox exec -- hcloud server ip "$SERVER_NAME"'''
+
+# ── snapshot ──────────────────────────────────────────────────────────────
+[tasks."snapshot:create"]
+description = "Snapshot the running VM so Windows survives a `vm:down`/`vm:up` cycle. Hot snapshot (VM stays running) — Hetzner does a crash-consistent capture; for cleanest results shut Windows down via RDP first. Storage cost: ~€0.012/GB/mo while the snapshot exists (~€0.40-0.80/mo typical for revit-vm)."
+run = '''
+TS=$(date -u +%Y%m%d-%H%M%S)
+DESC="$SERVER_NAME-$TS"
+echo "creating snapshot: $DESC"
+fnox exec -- hcloud server create-image \
+  --server "$SERVER_NAME" \
+  --type snapshot \
+  --description "$DESC"
+'''
+
+[tasks."snapshot:list"]
+description = "List snapshots in this Hetzner project (newest last). Use `mise run snapshot:prune` to delete all but the latest if costs accumulate."
+run = "fnox exec -- hcloud image list --type snapshot -o columns=id,description,disk_size,created"
+
+[tasks."snapshot:prune"]
+description = "Delete all snapshots except the newest one. Run after a fresh `snapshot:create` to stop paying for stale captures."
+run = '''
+KEEP=$(fnox exec -- hcloud image list --type snapshot -o json | jq -r 'sort_by(.created) | .[-1].id // empty')
+[ -z "$KEEP" ] && { echo "no snapshots"; exit 0; }
+echo "keeping snapshot $KEEP, deleting others..."
+fnox exec -- hcloud image list --type snapshot -o json \
+  | jq -r --arg keep "$KEEP" '.[] | select(.id|tostring != $keep) | .id' \
+  | while read ID; do
+      echo "  delete $ID"
+      fnox exec -- hcloud image delete "$ID"
+    done
+'''
+
+# ── rdp ───────────────────────────────────────────────────────────────────
+[tasks."rdp:wait"]
+description = "Block until port 3389 accepts TCP connections — the signal that Windows has fully booted past OOBE and the RDP service is up. Polls every 30s, times out at 90 min. Pops a macOS notification when ready so you can walk away. Chain it: `mise run rdp:wait && mise run rdp:open`."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+START=$(date +%s)
+MAX=$((90 * 60))
+echo "polling $IP:3389 (every 30s, max 90 min)..."
+while true; do
+  ELAPSED=$(( $(date +%s) - START ))
+  if [ "$ELAPSED" -gt "$MAX" ]; then
+    echo "[t+${ELAPSED}s] timed out — investigate via mise run viewer:open"
+    osascript -e 'display notification "RDP wait timed out after 90 min" with title "revit-vm" sound name "Basso"' 2>/dev/null
+    exit 1
+  fi
+  if nc -z -w 3 "$IP" 3389 2>/dev/null; then
+    echo "[t+${ELAPSED}s] 3389 accepting — Windows is RDP-ready"
+    osascript -e 'display notification "Windows is RDP-ready — run mise run rdp:open" with title "revit-vm" sound name "Glass"' 2>/dev/null
+    exit 0
+  fi
+  printf "[t+%ds] not yet\\r" "$ELAPSED"
+  sleep 30
+done
+'''
+
+[tasks."rdp:install"]
+description = "Install Microsoft's macOS RDP client ('Windows App') via Homebrew cask. One-time per machine. The cask runs a .pkg installer that needs sudo; a native macOS password dialog will pop (no terminal prompt). Idempotent — re-runs are no-ops once installed."
+run = '''
+if ls -d "/Applications/Windows App.app" >/dev/null 2>&1; then
+  echo "Windows App already installed."
+  exit 0
+fi
+ASKPASS=$(mktemp /tmp/askpass.XXXXXX)
+cat > "$ASKPASS" <<'EOF'
+#!/bin/bash
+osascript -e 'tell application "System Events" to display dialog "macOS sudo password (for installing Windows App):" default answer "" with hidden answer with title "mise rdp:install"' -e 'text returned of result' 2>/dev/null
+EOF
+chmod +x "$ASKPASS"
+SUDO_ASKPASS="$ASKPASS" brew install --cask windows-app
+RC=$?
+rm -f "$ASKPASS"
+exit $RC
+'''
+
+[tasks."rdp:open"]
+description = "Open RDP to the VM. Auto-installs the Windows App client on first run (pops macOS password dialog). dockur default credentials: user `Docker`, password empty. RDP will refuse the connection until Windows finishes installing — watch progress in `mise run viewer:open` first."
+depends = ["rdp:install"]
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+RDP=/tmp/revit-batch-node.rdp
+cat > "$RDP" <<EOF
+full address:s:$IP:3389
+username:s:Docker
+prompt for credentials:i:0
+screen mode id:i:1
+desktopwidth:i:1600
+desktopheight:i:1000
+session bpp:i:32
+audiomode:i:0
+EOF
+echo "wrote $RDP — host $IP:3389, user Docker, password empty (just press enter)"
+echo "probing port 3389..."
+nc -z -w 3 "$IP" 3389 \
+  && echo "3389 reachable — opening" \
+  || echo "3389 not listening yet (Windows still installing?) — opening anyway"
+open "$RDP"
+'''
+
+# ── workspace ─────────────────────────────────────────────────────────────
+# Files placed in /root/windows_shared on the VM appear inside Windows as
+# \\host.lan\Data — that's how .rvt files, batch-processor jobs, and outputs
+# move across the Mac↔Windows boundary without RDP click-through.
+[tasks."workspace:push"]
+description = "scp a local file/dir up to the VM's shared folder. Usage: `mise run workspace:push <path>` — lands at /root/windows_shared/<basename>, visible inside Windows as \\\\host.lan\\Data\\<basename>."
+run = '''
+[ -z "$1" ] && { echo "usage: mise run workspace:push <local-path>"; exit 1; }
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "$1" "root@$IP:/root/windows_shared/"
+echo "pushed: visible inside Windows at \\\\host.lan\\Data\\$(basename "$1")"
+'''
+
+[tasks."workspace:pull"]
+description = "scp a file/dir back from the VM's shared folder. Usage: `mise run workspace:pull <name>` — pulls /root/windows_shared/<name> into the current dir."
+run = '''
+[ -z "$1" ] && { echo "usage: mise run workspace:pull <remote-name>"; exit 1; }
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "root@$IP:/root/windows_shared/$1" .
+echo "pulled: ./$1"
+'''
+
+[tasks."workspace:ls"]
+description = "List the VM-side shared folder (what's in \\\\host.lan\\Data right now)."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" "ls -lh /root/windows_shared/{installers,jobs,output}/ 2>/dev/null"
+'''
+
+# ── software ──────────────────────────────────────────────────────────────
+[tasks."software:fetch"]
+description = "Read installers.txt and download every PUBLIC Windows installer listed into /root/windows_shared/installers/ on the VM. Idempotent — already-present files are skipped. Per-account-auth'd installers (Revit, AutoCAD, …) stay out of this list; push those via `mise run workspace:push`."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+KEY="${SSH_KEY_FILE/#~/$HOME}"
+ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
+  "mkdir -p /root/windows_shared/installers"
+grep -v "^#" installers.txt | grep -v "^[[:space:]]*$" | while read NAME URL REST; do
+  echo "fetching $NAME"
+  ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
+    "[ -f /root/windows_shared/installers/$NAME ] && echo '  already present' || curl -sSL --fail -o /root/windows_shared/installers/$NAME '$URL'"
+done
+ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
+  "ls -lh /root/windows_shared/installers/"
+'''
+
+[tasks."software:fetch-revit"]
+description = "Download YOUR Revit installer (account-tied, time-limited URL from manage.autodesk.com) directly onto the VM, and copy the silent-install batch alongside it. Reads REVIT_INSTALLER_URL from mise.local.toml — errors clearly if empty. Cheaper than push-from-Mac (VM-side download = Hetzner DC bandwidth, not your home upload). After this: RDP in, run `\\\\host.lan\\Data\\install-revit.bat`, sign in to the trial inside Revit, snapshot."
+run = '''
+if [ -z "$REVIT_INSTALLER_URL" ]; then
+  echo "REVIT_INSTALLER_URL not set."
+  echo "  1. Copy mise.local.toml.example to mise.local.toml"
+  echo "  2. Paste your Autodesk download URL (manage.autodesk.com → Revit → Download)"
+  echo "  3. Re-run this task"
+  exit 1
+fi
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+KEY="${SSH_KEY_FILE/#~/$HOME}"
+echo "downloading Revit installer to the VM (this is the big one — many GB)..."
+ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
+  "mkdir -p /root/windows_shared/installers && \
+   [ -f /root/windows_shared/installers/Revit_Installer.exe ] \
+     && echo 'already present — delete it on the VM to force re-download' \
+     || curl -L --fail --progress-bar -o /root/windows_shared/installers/Revit_Installer.exe '$REVIT_INSTALLER_URL'"
+echo "uploading install-revit.bat..."
+scp -i "$KEY" -o StrictHostKeyChecking=accept-new \
+  windows-scripts/install-revit.bat "root@$IP:/root/windows_shared/install-revit.bat"
+echo
+echo "Done. Inside Windows (RDP in via \`mise run rdp:open\`), run:"
+echo "  \\\\host.lan\\Data\\install-revit.bat"
+'''
+
+[tasks."software:list"]
+description = "List installers declared in installers.txt + what's already staged on the VM."
+run = '''
+echo "=== installers.txt (declared) ==="
+grep -v "^#" installers.txt | grep -v "^[[:space:]]*$" | awk '{print $1}'
+echo "=== /root/windows_shared/installers/ on the VM (staged) ==="
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" \
+  "ls -lh /root/windows_shared/installers/ 2>/dev/null || echo '(none — vm may pre-date the shared-folder cloud-init, or run mise run software:fetch)'"
+'''
+
+# ── trial ─────────────────────────────────────────────────────────────────
+[tasks."trial:remind"]
+description = "Print how many days are left on your Autodesk Revit trial — based on the TRIAL_STARTED env var (ISO date) at the top of mise.toml. Autodesk doesn't expose a public 'days remaining' API, so this is local math, not a server check. Set TRIAL_STARTED to the day you signed in to the trial."
+run = '''
+[ -z "$TRIAL_STARTED" ] && { echo "TRIAL_STARTED not set in mise.toml [env]"; exit 1; }
+EXPIRES=$(date -u -j -v+30d -f "%Y-%m-%d" "$TRIAL_STARTED" +"%Y-%m-%d" 2>/dev/null) || \
+EXPIRES=$(date -u -d "$TRIAL_STARTED + 30 days" +"%Y-%m-%d")
+TODAY=$(date -u +%Y-%m-%d)
+DAYS_LEFT=$(( ( $(date -j -f "%Y-%m-%d" "$EXPIRES" +%s 2>/dev/null || date -d "$EXPIRES" +%s) - $(date +%s) ) / 86400 ))
+echo "trial started:  $TRIAL_STARTED"
+echo "trial expires:  $EXPIRES"
+echo "days remaining: $DAYS_LEFT"
+[ "$DAYS_LEFT" -lt 7 ] && echo "⚠  fewer than 7 days left — convert to paid or finish evaluation"
+'''
+
+# ── viewer ────────────────────────────────────────────────────────────────
+[tasks."viewer:open"]
+description = "Open dockur's web viewer (port 8006) in the default browser. Works the moment dockur is up — shows Windows install progress, then Windows itself."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+echo "opening http://$IP:8006/"
+open "http://$IP:8006/"
+'''

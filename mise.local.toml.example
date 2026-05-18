@@ -1,0 +1,18 @@
+# Local mise overrides. Copy to `mise.local.toml` and fill in. Gitignored —
+# never commit. `mise.local.toml` merges OVER `mise.toml` per mise's standard
+# config-stacking, so the [env] keys here win.
+#
+# Put account-tied URLs here, NOT in mise.toml.
+
+[env]
+# Your personal Revit installer download URL from
+# manage.autodesk.com → Products & Services → Revit → Download.
+# Autodesk's URLs are signed and time-limited — typically valid for ~7 days
+# after generation; refresh as needed. The file behind the URL is YOUR
+# account's installer (it'll request your sign-in on first Revit launch
+# inside Windows, which is the trial-registration moment).
+REVIT_INSTALLER_URL = ""
+
+# Set this to the ISO date you signed into the trial (`mise run trial:remind`
+# uses it to count down).
+TRIAL_STARTED = ""

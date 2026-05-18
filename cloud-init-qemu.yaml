@@ -1,0 +1,42 @@
+#cloud-config
+# QEMU/TCG variant — runs on hosts WITHOUT /dev/kvm (e.g. Hetzner Cloud,
+# any tier). Forces software emulation via `-e KVM=N`; ~10x slower than
+# KVM-backed but works everywhere. Pair with `mise run up` (default).
+# Use `cloud-init-kvm.yaml` + `mise run up-kvm` on KVM-capable hosts.
+package_update: true
+packages:
+  - docker.io
+  - docker-compose
+
+runcmd:
+  # Storage for the Windows VM image (dockur writes the .qcow2 here)
+  - mkdir -p /root/windows_storage
+
+  # Shared workspace: anything dropped here appears inside Windows as
+  # \\host.lan\Data — that's how you get .rvt files, batch-processor
+  # job specs, installers, and outputs across the Mac↔Windows boundary
+  # without RDP click-through. Drop files via `mise run workspace:push <file>`
+  # and `mise run software:fetch-*` tasks. cloud-init stays minimal on
+  # purpose — Windows app installs (Revit, RBP, …) are post-Windows-boot
+  # work, not bootstrap work.
+  - mkdir -p /root/windows_shared/installers
+  - mkdir -p /root/windows_shared/jobs
+  - mkdir -p /root/windows_shared/output
+
+  # Run the dockur/windows container automatically.
+  # KVM=N forces QEMU/TCG software emulation — Hetzner Cloud doesn't expose
+  # nested virtualization on any server tier. Expect ~5-10x slower Windows
+  # vs KVM-backed; viable for batch workloads, painful for interactive.
+  - >
+    docker run -d --name windows_batch_processor
+    -p 8006:8006
+    -p 3389:3389/tcp
+    -p 3389:3389/udp
+    --cap-add NET_ADMIN
+    -e KVM=N
+    -e RAM_SIZE="12G"
+    -e CPU_CORES="6"
+    -v /root/windows_storage:/storage
+    -v /root/windows_shared:/data
+    --restart unless-stopped
+    dockurr/windows
