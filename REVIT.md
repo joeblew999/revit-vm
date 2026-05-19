@@ -110,6 +110,10 @@ That's why our `operations/revit/export-ifc/` has BOTH a Rust binary (drives RBP
 - **Revit 2027 will break mainline RBP.** Revit 2027 ships on .NET 10; the IronPython 2.7.12 RBP embeds is incompatible (issue [bvn-architecture/RevitBatchProcessor#147](https://github.com/bvn-architecture/RevitBatchProcessor/issues/147)). A working fork from `@robmintzes` migrates RBP to IronPython 3.4.2 and has verified Revit 2023–2027 end-to-end: https://github.com/robmintzes/RevitBatchProcessor/tree/feature/revit-2027-support — two commits, not yet merged upstream. When we move to Revit 2027, swap `installers.txt` to that fork's release (or to upstream once they merge it).
 - **Order of install matters.** RBP scans for already-installed Revit versions and drops per-year addins under `%APPDATA%\Autodesk\Revit\Addins\<year>`. Install Revit first, RBP second. `windows-scripts/install-revit.bat` does this in the right order.
 
+### Starter operation in the repo
+
+`windows-runner/operations/revit/export-ifc/` has a starter `revit-side.py` — minimum-viable IFC export script following @jchristel's pattern (DEBUG toggle, `revit_script_util` integration, transactional Revit API call). Plus a README walking through how to validate by hand inside RDP before wrapping it in Rust. Not yet tested against a real model; that's the next physical step when you boot Windows again.
+
 ### Personal use doesn't need Rust — RBP runs Python directly
 
 When prototyping, exploring, or just running one-off batch jobs inside RDP, you don't compile anything:
