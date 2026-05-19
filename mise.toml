@@ -106,14 +106,14 @@ TS=$(date -u +%Y%m%d-%H%M%S)
 DESC="$SERVER_NAME-$TS"
 echo "creating snapshot: $DESC"
 fnox exec -- hcloud server create-image \
-  --server "$SERVER_NAME" \
   --type snapshot \
-  --description "$DESC"
+  --description "$DESC" \
+  "$SERVER_NAME"
 '''
 
 [tasks."snapshot:list"]
 description = "List snapshots in this Hetzner project (newest last). Use `mise run snapshot:prune` to delete all but the latest if costs accumulate."
-run = "fnox exec -- hcloud image list --type snapshot -o columns=id,description,disk_size,created"
+run = "fnox exec -- hcloud image list --type snapshot -o columns=id,description,image_size,created"
 
 [tasks."snapshot:prune"]
 description = "Delete all snapshots except the newest one. Run after a fresh `snapshot:create` to stop paying for stale captures."
@@ -202,21 +202,27 @@ open "$RDP"
 # \\host.lan\Data — that's how .rvt files, batch-processor jobs, and outputs
 # move across the Mac↔Windows boundary without RDP click-through.
 [tasks."workspace:push"]
-description = "scp a local file/dir up to the VM's shared folder. Usage: `mise run workspace:push <path>` — lands at /root/windows_shared/<basename>, visible inside Windows as \\\\host.lan\\Data\\<basename>."
+description = "scp a local file/dir up to the VM's shared folder. Usage: `mise run workspace:push -- <path>` (note the `--`). Lands at /root/windows_shared/<basename>, visible inside Windows as \\\\host.lan\\Data\\<basename>."
 run = '''
-[ -z "$1" ] && { echo "usage: mise run workspace:push <local-path>"; exit 1; }
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "$1" "root@$IP:/root/windows_shared/"
-echo "pushed: visible inside Windows at \\\\host.lan\\Data\\$(basename "$1")"
+push() {
+  [ -z "$1" ] && { echo "usage: mise run workspace:push -- <local-path>"; exit 1; }
+  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "$1" "root@$IP:/root/windows_shared/"
+  echo "pushed: visible inside Windows at \\\\host.lan\\Data\\$(basename "$1")"
+}
+push "$@"
 '''
 
 [tasks."workspace:pull"]
-description = "scp a file/dir back from the VM's shared folder. Usage: `mise run workspace:pull <name>` — pulls /root/windows_shared/<name> into the current dir."
+description = "scp a file/dir back from the VM's shared folder. Usage: `mise run workspace:pull -- <name>` (note the `--`). Pulls /root/windows_shared/<name> into the current dir."
 run = '''
-[ -z "$1" ] && { echo "usage: mise run workspace:pull <remote-name>"; exit 1; }
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "root@$IP:/root/windows_shared/$1" .
-echo "pulled: ./$1"
+pull() {
+  [ -z "$1" ] && { echo "usage: mise run workspace:pull -- <remote-name>"; exit 1; }
+  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "root@$IP:/root/windows_shared/$1" .
+  echo "pulled: ./$1"
+}
+pull "$@"
 '''
 
 [tasks."workspace:ls"]

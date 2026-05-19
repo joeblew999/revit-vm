@@ -38,5 +38,5 @@ runcmd:
     -e CPU_CORES="6"
     -v /root/windows_storage:/storage
     -v /root/windows_shared:/data
-    --restart unless-stopped
+    --restart=always
     dockurr/windows

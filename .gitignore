@@ -1,2 +1,5 @@
 mise.local.toml
 .DS_Store
+*.png
+*.jpg
+*.jpeg
