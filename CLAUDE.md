@@ -40,6 +40,10 @@ The repo exists because Revit needs Windows + (eventually) significant compute, 
 
 11. **Four-command daily UX is the target.** `start` / `stop` / `push` / `pull` cover 99% of work. Everything else (`vm:*`, `snapshot:*`, `rdp:*`, `software:*`, `files:*`, `viewer:*`, `token:*`, `trial:*`) is granular control or one-time setup. `debug:*` is for when something's wrong — neither you nor the user types those in normal use.
 
+## Considered and rejected
+
+- **`docker-compose.yml` instead of inline `docker run` in cloud-init.** Pros: validated YAML schema, profiles (one file replaces both cloud-init variants), healthcheck on port 8006 for "wedged Windows" detection, sidecar headroom. Cons: zero change to daily UX, current snapshot is `docker run`-managed and would either stay that way or need an in-place container swap to migrate. Decision: not worth the churn while the current setup works. Revisit IF/WHEN: (a) we want healthchecks for TCG-hung-Windows auto-recovery, (b) we add a sidecar (Caddy auth in front of 8006, snapshot watcher, etc.), or (c) flag edits on dockur become frequent. Until then, the inline `docker run` is fine.
+
 ## Hard-won lessons (live-fire scars from building this)
 
 - **Hetzner deprecates SKUs in specific datacenters.** `cpx41` was retired in `fsn1` mid-2026; `cpx42` is the same-spec successor (8c / 16 GB / 320 GB AMD shared, ~€0.045/hr).
