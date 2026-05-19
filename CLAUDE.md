@@ -1,15 +1,17 @@
 # Context for Claude Code
 
-For agents (and humans) working on this repo. Read it before answering questions or writing code. **Then read [README.md](README.md)** for the daily-use surface.
+For agents (and humans) working on this repo. Read it before answering questions or writing code. **Then read [README.md](README.md)** for the daily-use surface, [REVIT.md](REVIT.md) for the headline app, [SERVICE.md](SERVICE.md) for the convert-on-demand SaaS design that's not built yet.
 
 This file is for *why* and the rules that aren't visible in code. It's the place to capture decisions already made so they don't get re-litigated every session.
 
 ## What this repo is
 
-A `mise`-driven toolchain that stands up a Hetzner Cloud VM running Windows inside [dockur/windows](https://github.com/dockur/windows), so Autodesk Revit can be installed there and used for **batch processing** from a Mac. The Mac is the control plane; everything happens via `mise run <task>`.
+A `mise`-driven toolchain that stands up a Hetzner Cloud VM running Windows inside [dockur/windows](https://github.com/dockur/windows), so arbitrary Windows software can be installed there and used for **batch processing** from a Mac. The Mac is the control plane; everything happens via `mise run <task>`.
 
-The repo exists because Revit needs Windows + (eventually) significant compute, and the project owner wants:
-- A 30-day **trial-first** evaluation of the pipeline (proof it works end-to-end).
+The mechanism is generic — any Windows software fits. The headline app is Autodesk Revit (see [REVIT.md](REVIT.md)); a forward-looking service architecture that extends to multiple apps is sketched in [SERVICE.md](SERVICE.md).
+
+Today's owner goals:
+- A 30-day **trial-first** Revit evaluation (proof the pipeline works end-to-end).
 - A path to convert to a **paid Revit subscription** if/when the pipeline is worth it.
 - Minimal cognitive load — daily use is 4 commands (`start`, `stop`, `push`, `pull`).
 - A snapshot-based persistence model so each session doesn't redo the ~1 hr Windows install.
@@ -39,6 +41,8 @@ The repo exists because Revit needs Windows + (eventually) significant compute, 
 10. **`oem/install.bat` for first-boot Windows automation.** dockur's documented `/oem` hook: anything mounted at `/oem` is copied to `C:\OEM` and `install.bat` runs as Admin during the LAST step of the unattended Windows install. Fires once, before any human logs in. Greenfield `vm:up` therefore lands on a fully-configured VM (Z: drive mapped, RBP extracted, Defender exclusions set, sleep disabled). **It does NOT re-run on `vm:up-snap`** — the snapshot is already past that point — so daily use never re-runs it. Treat it as the rebuild-from-scratch path.
 
 11. **Four-command daily UX is the target.** `start` / `stop` / `push` / `pull` cover 99% of work. Everything else (`vm:*`, `snapshot:*`, `rdp:*`, `software:*`, `files:*`, `viewer:*`, `token:*`, `trial:*`) is granular control or one-time setup. `debug:*` is for when something's wrong — neither you nor the user types those in normal use.
+
+12. **(Future) Operations are Rust crates, not loose scripts.** When SERVICE.md gets built out, each operation (`<app>/<op>`) is a small Rust crate cross-compiled from Mac to `x86_64-pc-windows-msvc`, producing a `.exe` baked into the VM snapshot. Vendor-side companion scripts (IronPython for Revit's RBP, `.scr` for AutoCAD) live alongside the Rust source. The IronPython case is the only sanctioned exception to the "Rust + Bash, no Python" rule — RBP forces it. See [SERVICE.md](SERVICE.md) → "Three layers per job."
 
 ## When does Windows reinstall? (the answer is "almost never")
 
@@ -95,7 +99,7 @@ When in doubt before any destructive-sounding action: `mise run snapshot:list` s
 
 ## Don't
 
-- Don't propose Python anywhere — user's standing rule (Rust + Bash only).
+- Don't propose Python anywhere — user's standing rule (Rust + Bash only). Single sanctioned exception: IronPython inside a Revit operation crate (RBP only takes Python). Document any new exception, don't widen the rule.
 - Don't propose token-injection / trial-cycling / harvested-credential-replay schemes for Autodesk. Refused once, will be refused again.
 - Don't put per-account values (Revit installer URL, trial start date) in `mise.toml` — they go in `mise.local.toml` (gitignored).
 - Don't put Revit installer download into `cloud-init-*.yaml` — multi-GB downloads in bootstrap turn `vm:up` into a coin-flip. Stage Revit via `software:fetch-revit` (host curl, parallel to Windows install) or `push` (Mac upload).

@@ -13,21 +13,17 @@ Revit is the **first** application, not the only one. The pipeline is app-agnost
 
 The mise primitives we already built (`vm:up-snap`, `push`, `pull`, `snapshot:create`, `vm:down`, etc.) **are the verbs the service orchestrator calls.** No rewrite — a thin layer on top.
 
-## Three layers per job (the load-bearing thing this section explains)
+## Three layers per job
 
 A "job" isn't `app + input file`. It's three things stacked:
 
-1. **The vendor app** (Revit, AutoCAD, ImageMagick, …) — pre-installed in the snapshot. App by itself does nothing.
-2. **An operation script** (.rps + .py for Revit Batch Processor, .scr/.lsp for AutoCAD accoreconsole, magick CLI args for ImageMagick) — this is **our custom code** and it tells the app what to do. Every job needs one. No exceptions.
+1. **The vendor app** (Revit, AutoCAD, ImageMagick, …) — pre-installed in the snapshot. App by itself does nothing useful.
+2. **The operation** — a small Rust crate that compiles to a Windows `.exe`, optionally paired with vendor-side companion scripts (IronPython for Revit's RBP, `.scr`/`.lsp` for AutoCAD's accoreconsole, etc.). The `.exe` is the orchestrator-on-the-Windows-side: it invokes the vendor app, suppresses popups, parses output, applies retries. **Every job needs one. No exceptions.**
 3. **The job's input file + params** — supplied per call.
 
-The operation script is the actual product. The app is plumbing. The customer is paying for *"export-rvt-to-ifc-with-our-rules,"* not *"a Revit on a VM."* This is why two services running the same app can produce very different things — the operation library is what differentiates them.
+The operation is the actual product. The app is plumbing. The customer is paying for *"export-rvt-to-ifc-with-our-rules,"* not *"a Revit on a VM."* This is why two services running the same app can produce very different things — the operation library is what differentiates them.
 
-### Operations are Rust binaries, not loose scripts
-
-Each operation is a small Rust crate that compiles to a Windows `.exe` (cross-compiled from Mac to `x86_64-pc-windows-msvc`). The binary is the orchestrator-on-the-Windows-side: it invokes the vendor app, watches stdout/stderr, parses outputs, handles retries and popup suppression. Matches the standing "Rust + Bash, no Python" rule.
-
-For apps that need scripts to be fed into them (Revit's RBP wants Python, AutoCAD wants .scr files), those scripts live next to the Rust source and get embedded into the binary or shipped alongside.
+Operations being Rust binaries (cross-compiled from Mac to `x86_64-pc-windows-msvc`) matches the standing "Rust + Bash, no Python" rule. The IronPython-inside-Revit case is a forced exception — RBP only takes Python — and it lives in the operation crate alongside the Rust source.
 
 Repo shape per operation:
 
@@ -103,22 +99,19 @@ Default-first. Don't accept arbitrary customer code at v1 — start with a curat
    │                                                          │
    │  In-Windows job runner (`windows-runner/main.ps1`):     │
    │    watches Z:\jobs\<job-id>.json                        │
-   │    resolves the operation script — copied into          │
-   │    Z:\operations\<app>\ at boot from the repo's         │
-   │    windows-runner/operations/ directory (or extracted   │
-   │    from a customer-supplied tarball for advanced tier)  │
-   │    dispatches by `app`:                                 │
-   │      revit       → RevitBatchProcessor.exe              │
-   │                    -s <export-ifc.rps>                  │
-   │                    -t <export-ifc.py>                   │
-   │                    --revit-file <input.rvt>             │
-   │      autocad     → accoreconsole.exe                    │
-   │                    /i <input.dwg>                       │
-   │                    /s <export-pdf.scr>                  │
-   │      imagemagick → magick convert <input>               │
-   │                    <args-from-operation> <output>       │
-   │      <new app>   → add a case statement                 │
-   │    writes Z:\output\<job-id>.<ext>                      │
+   │    runs the operation .exe baked into the snapshot at   │
+   │    C:\operations\<app>\<operation>\<operation>.exe      │
+   │                                                          │
+   │       <operation>.exe                                   │
+   │           --job-id <id>                                 │
+   │           --input  Z:\jobs\<id>\<input-file>            │
+   │           --output Z:\output\<id>\                      │
+   │           --params <json-from-job-row>                  │
+   │                                                          │
+   │    The .exe knows how to drive its vendor app —         │
+   │    RBP for Revit, accoreconsole for AutoCAD, magick for │
+   │    ImageMagick. main.ps1 stays thin (dispatch table     │
+   │    only); per-app shape lives inside each .exe.         │
    └─────────────────────────────────────────────────────────┘
 ```
 
@@ -178,7 +171,7 @@ Service mode is additive to personal mode — daily `mise run start/stop` still 
 | **R2 buckets** | `windows-service-in/<job-id>.<ext>`, `windows-service-out/<job-id>.<ext>`. Lifecycle rules to expire artifacts. |
 | **CF Queue or Durable Object** | The orchestrator's input. DO is nicer because it can hold the "last-active timestamp" for the idle-stop decision. |
 | **Orchestrator process** | Lifecycle loop. Bash or small Rust binary. Lives in `orchestrator/`. Runs on a `cax11` always-on box (~€3/mo) — simpler than trying to make a CF Worker SSH out. |
-| **In-Windows job runner** (`windows-runner/main.ps1`) | One PowerShell script with a dispatch table per app. Watches `Z:\jobs\`, picks the right exe + arg shape for each app, writes outputs to `Z:\output\`. Started at boot via a scheduled task installed by `oem/install.bat`. |
+| **In-Windows job runner** (`windows-runner/main.ps1`) | Thin dispatcher. Watches `Z:\jobs\`, looks up the operation's `.exe` (baked into the snapshot at `C:\operations\<app>\<op>\<op>.exe`), runs it with `--job-id / --input / --output / --params`. Per-app/per-operation logic lives inside each .exe, not here. Started at boot via a scheduled task installed by `oem/install.bat`. |
 | **Per-app installers** | Each app's installer flow lives next to its `<APP>.md`. Free apps go in `installers.txt`. Auth'd ones use the per-app `software:fetch-*` task pattern (`software:fetch-revit` is the template). |
 | **Per-customer / per-app auth + licensing** | Out of scope for v1. Single-tenant with a shared bearer token gets you to "service exists" fast. |
 
@@ -200,16 +193,16 @@ Adding a new app to the service:
 1. Decide which category above it falls in. If "no", stop.
 2. Write `<APP>.md` covering install method, license model, perf reality, costs.
 3. Add the installer to `installers.txt` (if public) or a `software:fetch-<app>` task (if account-tied).
-4. Add a dispatch case in `windows-runner/main.ps1` for the app's CLI invocation.
-5. **Write the first operation script(s)** under `windows-runner/operations/<app>/`. Without an operation, the app is plumbing with nothing to do. Start with the simplest one customers would actually ask for.
-6. Add `<app>` to the Worker's accepted-app + accepted-operation lists.
-7. Test end-to-end with one job. Snapshot.
+4. **Write the first operation crate** under `windows-runner/operations/<app>/<first-op>/`. Without an operation, the app is plumbing with nothing to do. Start with the simplest job customers would actually ask for. Cross-compile, deploy `.exe` to the VM via `mise run push`, snapshot.
+5. Add `<app>` to the Worker's accepted-app + accepted-operation lists.
+6. Test end-to-end with one job.
 
 Adding a new operation to an existing app (cheaper than adding a new app):
 
-1. Write the operation script under `windows-runner/operations/<app>/<name>.*`.
-2. Add `<name>` to the Worker's accepted-operations list for that app.
-3. Test. Snapshot if the script is heavy enough to need staging (most aren't — they're tiny text files baked into the snapshot via `oem/install.bat`).
+1. New crate under `windows-runner/operations/<app>/<name>/`. Cross-compile.
+2. `mise run push` the `.exe` to `C:\operations\<app>\<name>\` on the VM.
+3. Add `<name>` to the Worker's accepted-operations list for that app.
+4. Test. Snapshot to bake the new `.exe` in.
 
 ## Cost model — flips from "VM rent" to "per-conversion"
 
