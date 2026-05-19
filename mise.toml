@@ -3,12 +3,16 @@
 [tools]
 hcloud = "1.64.1"
 fnox = "1.19.0"
-# Python + uv for Mac-side linting of the IronPython operation scripts
+# Python + uv for linting the IronPython operation scripts
 # (windows-runner/operations/**/*.py). Can't execute them locally —
 # Revit's .NET assemblies are Windows-only — but py_compile + ruff catch
 # typos and obvious bugs before they cost an RDP round-trip.
 python = "3.13"
 uv = "0.11.15"
+# Nushell for task bodies that need to run on both Mac and Windows. Bash
+# is the default on Mac; cmd is the default on Windows; nushell behaves
+# identically on both. Opt in per-task via `shell = "nu --commands"`.
+"aqua:nushell/nushell" = "0.112.2"
 
 # Server provisioning parameters. Tweak here, not in task bodies.
 [env]
@@ -430,22 +434,24 @@ gh release list --repo dockur/windows --limit 3 2>/dev/null | head -3 | sed "s|^
 '''
 
 [tasks."python:check"]
-description = "Syntax-check every IronPython operation script on the Mac via `python -m py_compile`. Catches typos before they cost an RDP round-trip. Doesn't execute (Revit-specific imports are unresolvable here). Fast — <1s."
+description = "Syntax-check every IronPython operation script via `python -m py_compile`. Catches typos before they cost an RDP round-trip. Doesn't execute (Revit-specific imports are unresolvable here). Fast — <1s. Runs on Mac or Windows."
+shell = "nu --commands"
 run = '''
-files=$(find windows-runner -name "*.py" -type f 2>/dev/null)
-if [ -z "$files" ]; then
-  echo "no .py files under windows-runner/"
+let files = (glob windows-runner/**/*.py)
+if ($files | is-empty) {
+  print "no .py files under windows-runner/"
   exit 0
-fi
-python -m py_compile $files && echo "syntax ok: $files"
+}
+python -m py_compile ...$files
+print $"syntax ok: ($files | length) files"
 '''
 
 [tasks."python:lint"]
-description = "Lint every IronPython operation script on the Mac via `uvx ruff check`. Style + dead code + obvious bugs. Configured in pyproject.toml to ignore Revit-specific import patterns. Fast — <2s."
+description = "Lint every IronPython operation script via `uvx ruff check`. Style + dead code + obvious bugs. Configured in pyproject.toml to ignore Revit-specific import patterns. Fast — <2s. Runs on Mac or Windows."
 run = "uvx ruff check windows-runner tests"
 
 [tasks."python:test"]
-description = "Run every operation script on the Mac with mocked Revit modules (tests/revit_mocks.py). Won't catch Revit API behaviour mistakes, but DOES catch typos / wrong attribute names / missing imports / wrong arg counts. Pass here means the script structure is sound; real validation still needs RDP."
+description = "Run every operation script locally with mocked Revit modules (tests/revit_mocks.py). Won't catch Revit API behaviour mistakes, but DOES catch typos / wrong attribute names / missing imports / wrong arg counts. Pass here means the script structure is sound; real validation still needs RDP. Runs on Mac or Windows."
 run = "python tests/run.py"
 
 [tasks."debug:host-disk"]
