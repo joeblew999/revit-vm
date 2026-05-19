@@ -3,3 +3,6 @@ mise.local.toml
 *.png
 *.jpg
 *.jpeg
+# Python lint artifacts
+__pycache__/
+*.pyc
