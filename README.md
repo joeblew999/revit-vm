@@ -17,24 +17,18 @@ That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Win
 
 ### Cost at a glance
 
-**Current path — Hetzner Cloud, TCG software emulation (no KVM, ~10× slower than native)**
+All options compared apples-to-apples. **Hetzner Cloud bills by the hour but caps at a monthly equivalent** — so leaving a `cpx42` running 24×7 stops accruing once it hits the monthly figure. Dedicated/bare-metal options are monthly contracts.
 
-| State | Burn rate |
-|---|---|
-| VM running (`start` → working → no `stop` yet) | **€0.045 / hr** (cpx42 fsn1) |
-| VM stopped, snapshot kept (`stop` complete) | **€0.48 / mo** (one ~40 GB snapshot) |
-| Typical eval/test cycle, bursty use | **~€1–5 / month** |
+| Path | KVM? (perf) | €/hr while running | €/mo if running 24×7 | Snapshot idle cost | Notes |
+|---|---|---|---|---|---|
+| **Hetzner Cloud `cpx42`** (current default) | NO — TCG, ~10× slower than native | €0.045 | ~€28 (capped) | ~€0.48 | What `vm:up-qemu` uses. Bursty-cheap; fine for pipeline validation, not real CAD work. |
+| Hetzner Cloud `cpx62` | NO — TCG | €0.103 | ~€64 (capped) | ~€0.48 | More RAM, still TCG. |
+| **Hetzner Dedicated `AX41-NVMe`** (Robot, not hcloud) | YES — native | n/a (monthly only) | ~€39 | bare-metal backups, separate cost | First real production target. 6-core Ryzen 5, 64 GB, 2×512 GB NVMe. `vm:up-kvm`. Sometimes a €39 one-off setup fee. |
+| Hetzner Dedicated `EX44` | YES — native | n/a (monthly only) | ~€44 | bare-metal backups, separate cost | Core i5, 64 GB, 2×512 GB NVMe. Alternate to AX41. |
+| Vultr Bare Metal `E2.med` | YES — native | €0.124 | ~€83 (no cap, $90/mo published) | n/a | Hourly bare-metal — burst alternative to Hetzner Dedicated's monthly contract. 4-core, 32 GB. |
+| Local Linux KVM box | YES — native | €0 incremental | €0 | n/a | NUC / workstation / server you already own. Zero cloud cost; needs a residential IP. |
 
-**KVM path — native CPU speed (the eventual production option, ~10× faster than TCG)**
-
-| Host | Cost | Billing | Notes |
-|---|---|---|---|
-| Hetzner Dedicated Root **AX41-NVMe** (Robot, not hcloud) | ~€39 / mo | Monthly only, sometimes €39 one-off setup fee | 6-core Ryzen 5, 64 GB, 2×512 GB NVMe. KVM works. Use `vm:up-kvm` once host is provisioned. |
-| Hetzner Dedicated Root **EX44** | ~€44 / mo | Monthly only | Core i5, 64 GB, 2×512 GB NVMe. KVM works. |
-| Vultr Bare Metal **E2.med** | ~$90 / mo (~€83) | Hourly available (~€0.124 / hr) | 4-core, 32 GB. Faster to spin up/down ad hoc than Hetzner Robot. |
-| Local Linux KVM box | €0 incremental | n/a | Zero cloud cost; only fits if a residential-IP box is acceptable. |
-
-Per-VM hour the KVM path is more expensive — but it does Windows work at native speed, so a job that takes 4 hours under TCG might take 25 min on KVM. For batch throughput at production scale, KVM almost always wins.
+Bursty use on the current path costs **€1–5/month** because `mise run start` → work → `mise run stop` only meters during work hours. The €28/mo number is the worst case (left it running, never called `stop`).
 
 Software-specific costs (Revit subscription, etc.) live in the per-app docs — see [REVIT.md](REVIT.md). Full Hetzner cost breakdown is below.
 
