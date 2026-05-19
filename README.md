@@ -1,6 +1,8 @@
 # revit-vm
 
-Spin up a remote Windows VM that runs Autodesk Revit on Hetzner Cloud, driven entirely by `mise run` tasks. Built on [dockur/windows](https://github.com/dockur/windows) — auto-downloads the Windows ISO, runs unattended setup, exposes a web viewer on port 8006 and RDP on 3389.
+Spin up a remote Windows VM on Hetzner Cloud, driven entirely by `mise run` tasks. Built on [dockur/windows](https://github.com/dockur/windows) — auto-downloads the Windows ISO, runs unattended setup, exposes a web viewer on port 8006 and RDP on 3389. Mac is the control plane.
+
+Generic pipeline — any Windows software fits. The first/main target is Autodesk Revit; see **[REVIT.md](REVIT.md)** for that specific workflow, costs, and constraints.
 
 ## Daily workflow — four commands
 
@@ -15,14 +17,13 @@ That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Win
 
 ### Cost at a glance
 
-**Current path — Hetzner Cloud, TCG software emulation (no KVM, ~10× slower)**
+**Current path — Hetzner Cloud, TCG software emulation (no KVM, ~10× slower than native)**
 
 | State | Burn rate |
 |---|---|
 | VM running (`start` → working → no `stop` yet) | **€0.045 / hr** (cpx42 fsn1) |
 | VM stopped, snapshot kept (`stop` complete) | **€0.48 / mo** (one ~40 GB snapshot) |
-| Whole 30-day trial-eval cycle, realistic use | **~€1 total** |
-| Production with paid Revit (~€428/mo subscription dwarfs everything else) | **~€436 / mo** |
+| Typical eval/test cycle, bursty use | **~€1–5 / month** |
 
 **KVM path — native CPU speed (the eventual production option, ~10× faster than TCG)**
 
@@ -31,11 +32,11 @@ That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Win
 | Hetzner Dedicated Root **AX41-NVMe** (Robot, not hcloud) | ~€39 / mo | Monthly only, sometimes €39 one-off setup fee | 6-core Ryzen 5, 64 GB, 2×512 GB NVMe. KVM works. Use `vm:up-kvm` once host is provisioned. |
 | Hetzner Dedicated Root **EX44** | ~€44 / mo | Monthly only | Core i5, 64 GB, 2×512 GB NVMe. KVM works. |
 | Vultr Bare Metal **E2.med** | ~$90 / mo (~€83) | Hourly available (~€0.124 / hr) | 4-core, 32 GB. Faster to spin up/down ad hoc than Hetzner Robot. |
-| Local Linux KVM box (NUC, workstation, server you already own) | €0 incremental | n/a | Zero cloud cost; only fits if a residential-IP box is acceptable. |
+| Local Linux KVM box | €0 incremental | n/a | Zero cloud cost; only fits if a residential-IP box is acceptable. |
 
-Per-VM hour the KVM path is more expensive — but it does Revit at native speed, so a job that takes 4 hours under TCG might take 25 min on KVM (~10× per dockur maintainer). For batch throughput at production scale, KVM almost always wins.
+Per-VM hour the KVM path is more expensive — but it does Windows work at native speed, so a job that takes 4 hours under TCG might take 25 min on KVM. For batch throughput at production scale, KVM almost always wins.
 
-Full breakdown + worked examples in the [Costs](#costs) section below.
+Software-specific costs (Revit subscription, etc.) live in the per-app docs — see [REVIT.md](REVIT.md). Full Hetzner cost breakdown is below.
 
 ### First-time setup (once per machine)
 
@@ -47,17 +48,15 @@ mise run start            # first run does the ~1hr Windows install; subsequent 
 
 **RDP login**: user `Docker`, password `admin` (dockur defaults — `mise run rdp:open` prefills the username; type the password when the client asks).
 
-**Optional local overrides** in `mise.local.toml` (gitignored — copy from `mise.local.toml.example`):
-- `REVIT_INSTALLER_URL` — your per-account Autodesk download URL, used by `mise run software:fetch-revit`
-- `TRIAL_STARTED` — ISO date, makes `mise run trial:remind` count down to expiry
+**Optional local overrides** in `mise.local.toml` (gitignored — copy from `mise.local.toml.example`). Per-app — see the app's own doc (`REVIT.md`, etc.).
 
 ### Adding software
 
-Public free downloads (RBP, Notepad++, 7-Zip, dev tools):
+Public free downloads (Revit Batch Processor, Notepad++, 7-Zip, dev tools, …):
 - Add a line to `installers.txt`, then `mise run software:fetch` — VM downloads them into the shared folder.
 
-Per-account auth'd installers (Revit, AutoCAD, Adobe CC):
-- Download to your Mac, then `mise run push -- ~/Downloads/Installer.exe`. Or for Revit specifically, put your account-tied URL in `mise.local.toml` and use `mise run software:fetch-revit` (VM-side download, ~10× faster than home upload).
+Per-account auth'd installers (Revit, AutoCAD, Adobe CC, …):
+- Download to your Mac, then `mise run push -- ~/Downloads/Installer.exe`. For app-specific automation (e.g. fetching directly from a vendor URL), see the app's doc (`REVIT.md` for Revit).
 
 After installing inside Windows, `mise run stop` snapshots the new state so it survives forever.
 
@@ -74,15 +73,15 @@ SNAPSHOTS_KEEP=3 mise run stop     # keeps newest 3 instead of 1 — costs ~€1
 Or run prune standalone whenever:
 
 ```
-mise run snapshot:list              # see what's there
-SNAPSHOTS_KEEP=3 mise run snapshot:prune    # one-shot adjust retention
+mise run snapshot:list                       # see what's there
+SNAPSHOTS_KEEP=3 mise run snapshot:prune     # one-shot adjust retention
 ```
 
 Cost is linear: each retained ~40 GB snapshot is ~€0.48/mo. N=3 is a reasonable default once you have real work that you'd hate to lose.
 
 ### Reference — all tasks
 
-`mise tasks` lists them grouped by noun (`vm:*`, `snapshot:*`, `rdp:*`, `software:*`, `files:*`, `token:*`, `trial:*`, `viewer:*`). The four top-level ones (`start`, `stop`, `push`, `pull`) compose them. Granular tasks are there for when you want explicit control (snapshot without destroying, change restart policy, etc.).
+`mise tasks` lists them grouped by noun (`vm:*`, `snapshot:*`, `rdp:*`, `software:*`, `files:*`, `token:*`, `trial:*`, `viewer:*`). The four top-level ones (`start`, `stop`, `push`, `pull`) compose them. Granular tasks are there for when you want explicit control (snapshot without destroying, change restart policy, etc.). `debug:*` tasks are for troubleshooting only.
 
 ## Costs
 
@@ -96,13 +95,13 @@ All prices are Hetzner Cloud retail, EUR, including 19% VAT. Hourly billing, bil
 | `cpx52` | 12 | 24 GB | 480 GB | 0.0644 | ~40.14 |
 | `cpx62` | 16 | 32 GB | 640 GB | 0.1029 | ~64.21 |
 
-The trial pipeline runs entirely in bursts — `vm:up` → work → `snapshot:create` → `vm:down`. A typical "install Revit, prove the pipeline" session burns ~2 hours of VM time (~€0.09).
+Bursty use is the intended pattern — `start` → work → `stop`. A typical evaluation session burns ~2 hours of VM time (~€0.09).
 
 ### Storage (always-on, even with VM destroyed)
 
 | Resource | Rate | Realistic monthly |
 |---|---|---|
-| Snapshot (typical Windows + Revit ≈ 40 GB used) | €0.012/GB/mo | ~€0.48 |
+| Snapshot (typical Windows install ≈ 40 GB used) | €0.012/GB/mo | ~€0.48 |
 | Volume (if used for persistent shared storage instead of host disk) | €0.044/GB/mo | ~€2.20 for 50 GB |
 | Outbound traffic | €1/TB after 20 TB free | basically free at this workload |
 
@@ -112,52 +111,36 @@ The trial pipeline runs entirely in bursts — `vm:up` → work → `snapshot:cr
 |---|---|
 | Windows 11 (downloaded by dockur from Microsoft, runs without product key in evaluation mode) | €0 |
 | dockur/windows container image | €0 (MIT-licensed, public Docker Hub) |
-| Revit Batch Processor (open-source, github.com/bvn-architecture/RevitBatchProcessor) | €0 |
-| Autodesk Revit — 30-day trial | €0, single account, no renewal scripting |
-| Autodesk Revit — paid subscription after trial | €428/mo or €3,431/yr (1-user, list price; AEC Collection ~€3,400/yr) |
-
-### Worked examples
-
-**Trial evaluation, single 30-day window:**
-- Provision + Windows install + Revit install + snapshot: ~3 hr × €0.0449 ≈ **€0.13**
-- 10 follow-up sessions of 1 hr each: 10 × €0.0449 ≈ **€0.45**
-- Snapshot sitting idle for 30 days: 40 GB × €0.012 ≈ **€0.48**
-- **30-day trial total: ~€1.06 + your time + €0 Autodesk**
-
-**Production batch-processing (post-trial, paid Revit):**
-- 5 batch sessions/week × 2 hr × €0.0449 = €1.80/week → ~€7.80/mo VM
-- Snapshot idle: ~€0.50/mo
-- Revit subscription: ~€428/mo
-- **Monthly: ~€436** — Revit dwarfs everything else
-
-If batch volume grows past a few sessions a day, look at **Autodesk Platform Services (APS) Design Automation for Revit** — server-side headless Revit billed per cloud-credit. Likely cheaper than running your own VM for production scale.
+| Application costs (Revit, AutoCAD, etc.) | see per-app doc (`REVIT.md`, …) |
 
 ## Performance reality
 
 The Hetzner cpx VMs **don't expose nested virtualisation**, so dockur runs Windows under QEMU/TCG software emulation. Expect:
 
 - ~10× slower CPU than a native Windows install on equivalent hardware
-- No GPU acceleration — Revit falls back to Microsoft's software rasterizer
-- Real Revit work on real-size models = not viable here
-- Pipeline verification + small-model batch jobs = viable but slow
+- No GPU acceleration — apps fall back to Microsoft's software rasterizer (WARP)
+- Real graphics-heavy work (CAD viewports, 3D rendering) on real-size projects = not viable here
+- Pipeline verification + small-data batch jobs = viable but slow
 
-For real production performance you need either Hetzner Dedicated Root Server (bare-metal, restores KVM, monthly billing), another cloud's bare-metal SKU, or APS Design Automation.
+For real production performance you need either Hetzner Dedicated Root Server (bare-metal, restores KVM, monthly billing) or another cloud's bare-metal SKU. Per-app advice in the app's doc.
 
 ## Files in this repo
 
 | File | Purpose |
 |---|---|
 | `mise.toml` | All tasks, env, tool pins. Entry point. |
-| `mise.local.toml.example` | Template for per-account secrets (Revit installer URL, trial start date). Copy to `mise.local.toml` (gitignored). |
+| `mise.local.toml.example` | Template for per-account/per-app secrets (gitignored when copied to `mise.local.toml`). |
 | `fnox.toml` | Maps `HCLOUD_TOKEN` keychain item → env var for mise tasks |
 | `cloud-init-qemu.yaml` | Host bootstrap for Hetzner Cloud (KVM disabled, TCG emulation) |
 | `cloud-init-kvm.yaml` | Host bootstrap for KVM-capable hosts (Hetzner Dedicated, other clouds, local) |
 | `installers.txt` | Declarative list of public Windows installers to stage in the shared folder |
-| `windows-scripts/install-revit.bat` | Silent-install template run from inside Windows |
-| `oem/install.bat` | Auto-runs ONCE inside Windows at the end of the unattended install on a fresh `vm:up`. Maps Z: → `\\host.lan\Data`, extracts RBP, sets Defender exclusions, disables sleep, silent-installs Revit if `Revit_Installer.exe` is staged. Skipped by `vm:up-snap` (snapshot is past that point) — so daily use never re-runs it. Greenfield rebuilds are turn-key. |
+| `oem/install.bat` | Auto-runs ONCE inside Windows at the end of the unattended install on a fresh `vm:up`. Maps Z: → `\\host.lan\Data`, extracts RBP, sets Defender exclusions, disables sleep. Skipped by `vm:up-snap` (snapshot is past that point). |
+| `windows-scripts/install-revit.bat` | Revit-specific helper. See `REVIT.md`. |
+| `REVIT.md` | Autodesk Revit specifics: trial workflow, sign-in, conversion, perf, costs. |
+| `CLAUDE.md` | Context for Claude Code (and any other agent): decisions made, lessons learned, rules. |
 
 ## Don't
 
-- Don't put account-tied URLs or trial start dates in `mise.toml` — those go in `mise.local.toml` (gitignored).
-- Don't run `mise run up-kvm` on Hetzner Cloud — it will fail. Hetzner Dedicated and other bare-metal hosts only.
-- Don't try to bypass Autodesk's per-trial sign-in by injecting harvested credential stores. Use the trial legitimately, then convert to paid; or skip Revit entirely and use APS.
+- Don't put account-tied URLs or trial dates in `mise.toml` — those go in `mise.local.toml` (gitignored).
+- Don't run `mise run vm:up-kvm` on Hetzner Cloud — it will fail. Hetzner Dedicated and other bare-metal hosts only.
+- App-specific rules (e.g. Autodesk sign-in handling) live in the app's own doc.
