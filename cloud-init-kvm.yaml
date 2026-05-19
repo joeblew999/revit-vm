@@ -44,4 +44,4 @@ runcmd:
     -v /root/windows_shared:/data
     -v /root/oem:/oem
     --restart=always
-    dockurr/windows
+    dockurr/windows:5.15
