@@ -15,22 +15,33 @@ mise run stop             # end work: snapshot, prune older snapshots, destroy V
 
 That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Windows install). `stop` always preserves state — `start` next time picks up where you left off.
 
-### Cost at a glance
+### What it costs — pick by usage
 
-All options compared apples-to-apples. **Hetzner Cloud bills by the hour but caps at a monthly equivalent** — so leaving a `cpx42` running 24×7 stops accruing once it hits the monthly figure. Dedicated/bare-metal options are monthly contracts.
+**The current `vm:up` (TCG / no KVM, cpx42):**
 
-| Path | KVM? (perf) | €/hr while running | €/mo if running 24×7 | Snapshot idle cost | Notes |
-|---|---|---|---|---|---|
-| **Hetzner Cloud `cpx42`** (current default) | NO — TCG, ~10× slower than native | €0.045 | ~€28 (capped) | ~€0.48 | What `vm:up-qemu` uses. Bursty-cheap; fine for pipeline validation, not real CAD work. |
-| Hetzner Cloud `cpx62` | NO — TCG | €0.103 | ~€64 (capped) | ~€0.48 | More RAM, still TCG. |
-| **Hetzner Dedicated `AX41-NVMe`** (Robot, not hcloud) | YES — native | n/a (monthly only) | ~€39 | bare-metal backups, separate cost | First real production target. 6-core Ryzen 5, 64 GB, 2×512 GB NVMe. `vm:up-kvm`. Sometimes a €39 one-off setup fee. |
-| Hetzner Dedicated `EX44` | YES — native | n/a (monthly only) | ~€44 | bare-metal backups, separate cost | Core i5, 64 GB, 2×512 GB NVMe. Alternate to AX41. |
-| Vultr Bare Metal `E2.med` | YES — native | €0.124 | ~€83 (no cap, $90/mo published) | n/a | Hourly bare-metal — burst alternative to Hetzner Dedicated's monthly contract. 4-core, 32 GB. |
-| Local Linux KVM box | YES — native | €0 incremental | €0 | n/a | NUC / workstation / server you already own. Zero cloud cost; needs a residential IP. |
+| You use it | You pay |
+|---|---|
+| A few hours total (trying it out, one trial install) | **~€1** |
+| ~10 hr / week (couple of sessions, then `stop`) | **~€3 / mo** |
+| ~50 hr / week | **~€10 / mo** |
+| Left it running 24×7 by accident | **~€28 / mo** (Hetzner caps here) |
+| Snapshot kept, VM destroyed | **+€0.48 / mo** flat (add to any row above) |
 
-Bursty use on the current path costs **€1–5/month** because `mise run start` → work → `mise run stop` only meters during work hours. The €28/mo number is the worst case (left it running, never called `stop`).
+**If you want native KVM speed (eventual production):**
 
-Software-specific costs (Revit subscription, etc.) live in the per-app docs — see [REVIT.md](REVIT.md). Full Hetzner cost breakdown is below.
+| Option | You pay |
+|---|---|
+| Hetzner Dedicated AX41-NVMe (`vm:up-kvm`, monthly contract) | **€39 / mo flat**, fast |
+| Vultr Bare Metal E2.med (hourly bare-metal) | **€0.12 / hr** or ~€83/mo always-on |
+| Local Linux box you already own | **€0**, fast, but needs a residential IP |
+
+**Rules of thumb:**
+
+- Daily use under 20 hr/week → stick with `cpx42` (TCG), pay €1–€5/mo total.
+- Real batch throughput / Revit at decent speed → Hetzner Dedicated AX41, €39/mo flat.
+- "Software fee" (Revit subscription, etc.) is a separate line — see [REVIT.md](REVIT.md). For Revit specifically, the €428/mo subscription dwarfs everything in the table above.
+
+Detailed price tables below if you want to do the arithmetic yourself.
 
 ### First-time setup (once per machine)
 
