@@ -15,12 +15,25 @@ That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Win
 
 ### Cost at a glance
 
+**Current path — Hetzner Cloud, TCG software emulation (no KVM, ~10× slower)**
+
 | State | Burn rate |
 |---|---|
 | VM running (`start` → working → no `stop` yet) | **€0.045 / hr** (cpx42 fsn1) |
 | VM stopped, snapshot kept (`stop` complete) | **€0.48 / mo** (one ~40 GB snapshot) |
 | Whole 30-day trial-eval cycle, realistic use | **~€1 total** |
 | Production with paid Revit (~€428/mo subscription dwarfs everything else) | **~€436 / mo** |
+
+**KVM path — native CPU speed (the eventual production option, ~10× faster than TCG)**
+
+| Host | Cost | Billing | Notes |
+|---|---|---|---|
+| Hetzner Dedicated Root **AX41-NVMe** (Robot, not hcloud) | ~€39 / mo | Monthly only, sometimes €39 one-off setup fee | 6-core Ryzen 5, 64 GB, 2×512 GB NVMe. KVM works. Use `vm:up-kvm` once host is provisioned. |
+| Hetzner Dedicated Root **EX44** | ~€44 / mo | Monthly only | Core i5, 64 GB, 2×512 GB NVMe. KVM works. |
+| Vultr Bare Metal **E2.med** | ~$90 / mo (~€83) | Hourly available (~€0.124 / hr) | 4-core, 32 GB. Faster to spin up/down ad hoc than Hetzner Robot. |
+| Local Linux KVM box (NUC, workstation, server you already own) | €0 incremental | n/a | Zero cloud cost; only fits if a residential-IP box is acceptable. |
+
+Per-VM hour the KVM path is more expensive — but it does Revit at native speed, so a job that takes 4 hours under TCG might take 25 min on KVM (~10× per dockur maintainer). For batch throughput at production scale, KVM almost always wins.
 
 Full breakdown + worked examples in the [Costs](#costs) section below.
 
