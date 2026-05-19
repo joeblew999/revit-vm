@@ -44,6 +44,8 @@ Today's owner goals:
 
 12. **(Future) Operations are Rust crates, not loose scripts.** When SERVICE.md gets built out, each operation (`<app>/<op>`) is a small Rust crate cross-compiled from Mac to `x86_64-pc-windows-msvc`, producing a `.exe` baked into the VM snapshot. Vendor-side companion scripts (IronPython for Revit's RBP, `.scr` for AutoCAD) live alongside the Rust source. The IronPython case is the only sanctioned exception to the "Rust + Bash, no Python" rule — RBP forces it. See [SERVICE.md](SERVICE.md) → "Three layers per job."
 
+13. **(Future) Observability is mandatory, not optional.** Every operation `.exe` must emit structured `tracing` events to a Cloudflare ingest Worker as it runs. Jobs are slow and async; without per-job event streams, the only way to debug a failed Revit job is RDP-ing into the VM and grepping by hand — doesn't scale. A shared `obs/` crate lives in the operations workspace; every operation imports it. The ingest Worker writes events to Workers Logs (matches the `scrapers-proxy` observability pattern) and a Durable Object per `job_id` for live status. See [SERVICE.md](SERVICE.md) → "Observability." This is step 1 of the build order, not an afterthought.
+
 ## When does Windows reinstall? (the answer is "almost never")
 
 This trips people up because the ~1 hr Windows install is intimidating. The truth is simple:

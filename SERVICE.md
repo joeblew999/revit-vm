@@ -115,6 +115,47 @@ Default-first. Don't accept arbitrary customer code at v1 — start with a curat
    └─────────────────────────────────────────────────────────┘
 ```
 
+## Observability — every operation logs to Cloudflare
+
+Jobs are slow (Revit batch can be minutes to hours), async (background QEMU + Windows + Revit processes), and failure modes are subtle: an unsuppressed dialog, a model that opened but lost a family link, an export that finished without writing the expected file. **The operation `.exe` MUST emit structured events to a Cloudflare ingest endpoint as it runs.** Without those events, debugging means RDP-ing into the VM and grepping Windows event log + RBP log + Revit journal file by hand. Doesn't scale to even one paying customer.
+
+Same shape as the observability pattern in `scrapers-proxy` — structured JSON events, picked up by CF Workers Logs, queryable via the existing `mcp__plugin_cloudflare_cloudflare-observability` tooling. Difference: instead of `console_log!` inside a Worker, the Windows-side Rust binary HTTP-POSTs to a tiny ingest Worker.
+
+### Event schema
+
+Every operation emits a stream of events sharing a `job_id`:
+
+| `kind` | When | Key fields |
+|---|---|---|
+| `job_start` | First thing the `.exe` does | `app`, `operation`, `input_size`, `host_metadata` |
+| `phase_enter` / `phase_exit` | Around each named work phase (`open_model`, `run_export`, `save_output`, etc.) | `phase`, `duration_ms`, `status` |
+| `dialog_suppressed` | IronPython's `DialogBoxShowing` handler dismisses a known-safe one | `dialog_id`, `action` |
+| `dialog_unhandled` | A dialog fired with no rule — high-signal, drives the next batch of suppressions | `dialog_id` |
+| `vendor_log` | RBP / accoreconsole writes something interesting | `vendor_app`, `level`, `message` |
+| `error` | Any caught failure | `kind`, `message`, `traceback` |
+| `job_complete` | Always — emit in a `Drop` guard so panics still produce it | `status`, `total_duration_ms`, `output_size`, `exit_code` |
+
+### What the Rust wrapper has to do
+
+Every operation crate:
+
+1. Reads `INGEST_URL` + `INGEST_TOKEN` from env (set by `main.ps1`, populated from the orchestrator's job dispatch).
+2. Emits `job_start` immediately, with the `job_id` passed in via `--job-id`.
+3. Wraps every meaningful chunk of work in `phase_enter` / `phase_exit`.
+4. Emits `job_complete` from a `Drop` guard so even panics produce a final event.
+5. Buffers + retries on network blips — Windows on Hetzner has occasional brief outages; losing 1 event in 1000 OK, losing the whole timeline NOT OK.
+
+Suggested implementation: `tracing` crate with a custom subscriber that batches JSON lines and POSTs via `reqwest`. One small `obs/` shared library inside `windows-runner/operations/` that every operation crate imports.
+
+### What you do with the logs
+
+- **Per-job timeline** — Durable Object keyed by `job_id`, fans events into a live status view for the customer.
+- **"Dialogs we've never handled" report** — drives the next batch of `revit-side.py` suppression rules. The single biggest source of Revit-batch failures.
+- **Cost attribution** — `sum(phase_exit.duration_ms)` per customer × VM €/hr → real per-customer billing.
+- **Failure dashboards** — which operations fail most, on what input shapes.
+
+The Rust code IS the source of truth for what happened inside Windows. With these events the orchestrator has the answer before the customer asks.
+
 ## Where this lives
 
 **In this repo, not a separate one.** The service code, orchestrator, Worker, schema, and mise tasks for both "personal use" (today) and "service mode" (future) all live in `revit-vm`. One mental model, one deploy story, one place to look. The repo's name predates the realisation that the shape is generic; the name stays for now since Revit is the headline app.
@@ -128,16 +169,21 @@ revit-vm/
 ├── mise.toml             (gains service:* tasks)
 ├── cloud-init-*.yaml     (unchanged — VM is still our building block)
 ├── oem/install.bat       (gains: install the Windows job-runner scheduled task)
-├── worker/                          (NEW — CF Worker source, Rust→WASM)
+├── worker/                          (NEW — CF Workers, Rust→WASM)
+│   ├── api/                         (public job-submission API)
+│   └── ingest/                      (event sink for the Windows-side .exe)
 ├── orchestrator/                    (NEW — Bash or small Rust binary for the polling loop)
 ├── windows-runner/                  (NEW — in-Windows side)
 │   ├── main.ps1                     (thin dispatcher — picks the operation .exe, runs it with job-id)
 │   └── operations/                  (the actual product — Rust workspace)
 │       ├── Cargo.toml               (workspace root)
+│       ├── obs/                     (shared crate — tracing → CF ingest, every operation uses)
+│       │   ├── Cargo.toml
+│       │   └── src/lib.rs
 │       ├── revit/
 │       │   ├── export-ifc/          (one operation = one crate)
 │       │   │   ├── Cargo.toml
-│       │   │   ├── src/main.rs      (Rust: invokes RBP, suppresses popups, parses output)
+│       │   │   ├── src/main.rs      (Rust: invokes RBP, suppresses popups, emits obs events)
 │       │   │   ├── revit-side.py    (IronPython that RBP runs inside Revit)
 │       │   │   └── revit-side.rps   (RBP settings template)
 │       │   └── export-pdf/
@@ -166,7 +212,9 @@ Service mode is additive to personal mode — daily `mise run start/stop` still 
 
 | Component | Role |
 |---|---|
-| **CF Worker** (Rust→WASM) | Public API. Job submission, status, R2 URL signing. Validates `app` against the supported list. Stack matches plat-trunk / scrapers-proxy. |
+| **CF Worker — API** (Rust→WASM) | Public API. Job submission, status, R2 URL signing. Validates `app` against the supported list. Stack matches plat-trunk / scrapers-proxy. |
+| **CF Worker — ingest** (Rust→WASM) | Receives structured events POSTed by the Windows-side operation `.exe` while a job runs (see "Observability" section). Validates `INGEST_TOKEN`, writes to Workers Logs + Durable Object per `job_id` for live status. |
+| **`obs/` library inside the operations workspace** | Small Rust crate shared by every operation. Wraps `tracing` with a batching/retrying HTTP subscriber. Every operation imports this — observability is not optional. |
 | **D1 schema** | Job state: `(id, customer_id, app, input_url, params, output_format, status, started_at, finished_at, result_url, error)`. |
 | **R2 buckets** | `windows-service-in/<job-id>.<ext>`, `windows-service-out/<job-id>.<ext>`. Lifecycle rules to expire artifacts. |
 | **CF Queue or Durable Object** | The orchestrator's input. DO is nicer because it can hold the "last-active timestamp" for the idle-stop decision. |
@@ -242,16 +290,17 @@ The repo still works for solo work via `mise run start/stop`. Service mode is op
 
 ## Build order (when you're ready)
 
-1. **The first operation** — `windows-runner/operations/revit/export-ifc/` Rust crate + IronPython companion. The actual product. The pipeline is nothing without an operation that does useful work. Write and validate by hand inside the running VM via RDP first — debug Revit's popup whack-a-mole there, then commit. **This is the hardest part of the whole project; see [REVIT.md → "Why Revit batch automation is the hard part"](REVIT.md#why-revit-batch-automation-is-the-hard-part-not-the-vm).**
-2. **In-Windows job runner** (`windows-runner/main.ps1`) that watches `Z:\jobs\` and dispatches one app + one operation. Pre-install via `oem/install.bat` so it survives snapshots and runs at boot.
-3. **One Worker route** that accepts a file via signed R2 URL + `{app: "revit", operation: "export-ifc"}`, writes a D1 row.
-4. **Orchestrator loop** on a `cax11`, Bash first. Polls D1, calls our existing mise tasks, updates D1.
-5. **Idle-stop timer** in the orchestrator.
-6. **One real customer or test scenario end-to-end.** Manual debugging.
-7. **Second operation, same app** (Revit export-pdf) — proves the operation library shape with low risk.
-8. **Second app** (probably ImageMagick or ffmpeg — free, fast, validates the per-app dispatch shape).
-9. **Multi-tenancy + billing** — once 1–8 work cleanly. Don't do this earlier; it'll guide design choices best when there's a real customer relationship.
-10. **Customer-supplied operation tarballs** — only if customers actually ask. Adds sandboxing and audit cost; skip until demand is real.
+1. **`obs/` shared crate + ingest Worker** — the observability backbone. Without it, every subsequent step is impossible to debug at scale. Tiny: a `tracing` subscriber that batches and HTTP-POSTs JSON events; a Worker route that authenticates by token and writes to Workers Logs.
+2. **The first operation** — `windows-runner/operations/revit/export-ifc/` Rust crate + IronPython companion. The actual product. Imports `obs/`, emits events as it works. Write and validate by hand inside the running VM via RDP first — debug Revit's popup whack-a-mole using the live event stream, then commit. **This is the hardest part of the whole project; see [REVIT.md → "Why Revit batch automation is the hard part"](REVIT.md#why-revit-batch-automation-is-the-hard-part-not-the-vm).**
+3. **In-Windows job runner** (`windows-runner/main.ps1`) that watches `Z:\jobs\` and dispatches one app + one operation. Passes `INGEST_URL` + `INGEST_TOKEN` to the .exe. Pre-install via `oem/install.bat` so it survives snapshots and runs at boot.
+4. **One API Worker route** that accepts a file via signed R2 URL + `{app: "revit", operation: "export-ifc"}`, writes a D1 row.
+5. **Orchestrator loop** on a `cax11`, Bash first. Polls D1, calls our existing mise tasks, updates D1.
+6. **Idle-stop timer** in the orchestrator.
+7. **One real customer or test scenario end-to-end.** Manual debugging — but now driven by the obs event stream, not RDP archaeology.
+8. **Second operation, same app** (Revit export-pdf) — proves the operation library shape with low risk.
+9. **Second app** (probably ImageMagick or ffmpeg — free, fast, validates the per-app dispatch shape).
+10. **Multi-tenancy + billing** — once 1–9 work cleanly. Don't do this earlier; it'll guide design choices best when there's a real customer relationship. The obs events already carry the data needed for per-customer cost attribution.
+11. **Customer-supplied operation tarballs** — only if customers actually ask. Adds sandboxing and audit cost; skip until demand is real.
 
 ## Open questions (don't resolve until needed)
 
