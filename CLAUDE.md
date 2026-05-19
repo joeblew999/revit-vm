@@ -40,6 +40,21 @@ The repo exists because Revit needs Windows + (eventually) significant compute, 
 
 11. **Four-command daily UX is the target.** `start` / `stop` / `push` / `pull` cover 99% of work. Everything else (`vm:*`, `snapshot:*`, `rdp:*`, `software:*`, `files:*`, `viewer:*`, `token:*`, `trial:*`) is granular control or one-time setup. `debug:*` is for when something's wrong — neither you nor the user types those in normal use.
 
+## When does Windows reinstall? (the answer is "almost never")
+
+This trips people up because the ~1 hr Windows install is intimidating. The truth is simple:
+
+| Trigger | Windows reinstall? |
+|---|---|
+| `mise run start` and a snapshot exists | **NO** — `vm:up-snap` restores the snapshot disk-for-disk, ~90s |
+| `mise run start` and zero snapshots exist | YES — falls through to `vm:up` (greenfield) |
+| Any edit to `cloud-init-*.yaml`, `oem/install.bat`, `mise.toml`, etc. | **NO** — code changes affect only the greenfield path; the snapshot is a frozen disk image and doesn't care |
+| `hcloud image delete <id>` or excessive `snapshot:prune` retention | YES on the next `vm:up` |
+
+**Default `snapshot:prune` keeps the newest 1**. The only way to lose the Windows install accidentally is to delete the snapshot manually OR drop retention below the current count. Set `SNAPSHOTS_KEEP=3` once you have real work to preserve.
+
+When in doubt before any destructive-sounding action: `mise run snapshot:list` should show at least one row. If it does, you can't accidentally trigger a reinstall.
+
 ## Considered and rejected
 
 - **`docker-compose.yml` instead of inline `docker run` in cloud-init.** Pros: validated YAML schema, profiles (one file replaces both cloud-init variants), healthcheck on port 8006 for "wedged Windows" detection, sidecar headroom. Cons: zero change to daily UX, current snapshot is `docker run`-managed and would either stay that way or need an in-place container swap to migrate. Decision: not worth the churn while the current setup works. Revisit IF/WHEN: (a) we want healthchecks for TCG-hung-Windows auto-recovery, (b) we add a sidecar (Caddy auth in front of 8006, snapshot watcher, etc.), or (c) flag edits on dockur become frequent. Until then, the inline `docker run` is fine.
