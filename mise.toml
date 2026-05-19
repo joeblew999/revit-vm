@@ -174,13 +174,15 @@ description = "List snapshots in this Hetzner project (newest last). Use `mise r
 run = "fnox exec -- hcloud image list --type snapshot -o columns=id,description,image_size,created"
 
 [tasks."snapshot:prune"]
-description = "Delete all snapshots except the newest one. Run after a fresh `snapshot:create` to stop paying for stale captures."
+description = "Delete all snapshots except the N newest. Default N=1 (paired with stop's snapshot:create — net effect: always exactly 1 snapshot). Override for rollback headroom: `SNAPSHOTS_KEEP=3 mise run snapshot:prune` keeps three. Storage cost scales linearly: each retained snapshot ≈ €0.48/mo at typical revit-vm size."
 run = '''
-KEEP=$(fnox exec -- hcloud image list --type snapshot -o json | jq -r 'sort_by(.created) | .[-1].id // empty')
-[ -z "$KEEP" ] && { echo "no snapshots"; exit 0; }
-echo "keeping snapshot $KEEP, deleting others..."
+N="${SNAPSHOTS_KEEP:-1}"
+TOTAL=$(fnox exec -- hcloud image list --type snapshot -o json | jq 'length')
+[ "$TOTAL" -le "$N" ] && { echo "have $TOTAL snapshot(s), keeping up to $N — nothing to prune"; exit 0; }
+KEEP_IDS=$(fnox exec -- hcloud image list --type snapshot -o json | jq -r --argjson n "$N" 'sort_by(.created) | .[-$n:] | .[].id')
+echo "keeping newest $N snapshot(s): $(echo $KEEP_IDS | tr '\n' ' ')"
 fnox exec -- hcloud image list --type snapshot -o json \
-  | jq -r --arg keep "$KEEP" '.[] | select(.id|tostring != $keep) | .id' \
+  | jq -r --argjson n "$N" 'sort_by(.created) | .[0:-$n] | .[].id' \
   | while read ID; do
       echo "  delete $ID"
       fnox exec -- hcloud image delete "$ID"
