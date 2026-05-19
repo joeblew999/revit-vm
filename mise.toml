@@ -3,6 +3,12 @@
 [tools]
 hcloud = "1.64.1"
 fnox = "1.19.0"
+# Python + uv for Mac-side linting of the IronPython operation scripts
+# (windows-runner/operations/**/*.py). Can't execute them locally —
+# Revit's .NET assemblies are Windows-only — but py_compile + ruff catch
+# typos and obvious bugs before they cost an RDP round-trip.
+python = "3.13"
+uv = "0.11.15"
 
 # Server provisioning parameters. Tweak here, not in task bodies.
 [env]
@@ -422,6 +428,21 @@ ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP"
 echo "=== latest available on GitHub ==="
 gh release list --repo dockur/windows --limit 3 2>/dev/null | head -3 | sed "s|^|  |"
 '''
+
+[tasks."python:check"]
+description = "Syntax-check every IronPython operation script on the Mac via `python -m py_compile`. Catches typos before they cost an RDP round-trip. Doesn't execute (Revit-specific imports are unresolvable here). Fast — <1s."
+run = '''
+files=$(find windows-runner -name "*.py" -type f 2>/dev/null)
+if [ -z "$files" ]; then
+  echo "no .py files under windows-runner/"
+  exit 0
+fi
+python -m py_compile $files && echo "syntax ok: $files"
+'''
+
+[tasks."python:lint"]
+description = "Lint every IronPython operation script on the Mac via `uvx ruff check`. Style + dead code + obvious bugs. Configured in pyproject.toml to ignore Revit-specific import patterns. Fast — <2s."
+run = "uvx ruff check windows-runner"
 
 [tasks."debug:host-disk"]
 description = "Disk usage on the host VM — sees both the Windows qcow2 (in /root/windows_storage) and the shared folder. Catches 'snapshot will be bigger than expected' early."

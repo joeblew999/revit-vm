@@ -1,0 +1,29 @@
+# Python project metadata + ruff config for linting our Revit IronPython
+# operations on the Mac, before they hit the Windows VM.
+#
+# We can't EXECUTE these scripts on Mac (they need IronPython 2.7 + Revit's
+# .NET assemblies + RBP's revit_script_util — all Windows-only). What we
+# CAN do is catch syntax errors and obvious bugs before pushing.
+#
+# `mise run python:check`  — runs `python -m py_compile` (fast, syntax only)
+# `mise run python:lint`   — runs `uvx ruff check` (style + dead code + bugs)
+
+[project]
+name = "revit-vm-operations"
+version = "0.1.0"
+description = "IronPython operation scripts that run inside Revit via RBP"
+requires-python = ">=3.13"
+
+[tool.ruff]
+line-length = 100
+target-version = "py37"  # IronPython 2.7 syntax is largely a Py3.7 subset
+extend-exclude = ["target", "build"]
+
+[tool.ruff.lint]
+# F401 unused imports — `clr` and `System` are imported for IronPython
+#        side-effects (CLR loading), not direct use.
+# F821 undefined name — `doc` is injected by Revit's Python macro env
+#        when DEBUG=True; ruff can't see that.
+# E402 module-level import not at top of file — we conditionally import
+#        revit_script_util after the DEBUG check.
+ignore = ["F401", "F821", "E402"]
