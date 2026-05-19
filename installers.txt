@@ -18,4 +18,13 @@
 #   "latest"). Reduces surprise when an upstream pushes a breaking version.
 
 # Revit Batch Processor — free open-source orchestrator for headless Revit jobs.
-RevitBatchProcessor.zip https://github.com/bvn-architecture/RevitBatchProcessor/archive/refs/heads/master.zip
+# This is the INSTALLER .exe (Inno Setup), not the source. The installer needs
+# to run AFTER Revit is installed — it scans for Revit versions and drops
+# per-year addins under %APPDATA%\Autodesk\Revit\Addins\<year>. Silent install
+# flag: /VERYSILENT.
+#
+# Pinned to v1.12.1 (Feb 2026) — supports Revit 2015–2026. For Revit 2027+
+# (Autodesk's .NET 10 release), the upstream IronPython 2.7 base breaks; use
+# the IronPython 3 fork at https://github.com/robmintzes/RevitBatchProcessor
+# branch feature/revit-2027-support. See REVIT.md.
+RevitBatchProcessorSetup.exe https://github.com/bvn-architecture/RevitBatchProcessor/releases/download/v1.12.1/RevitBatchProcessorSetup_v1.12.1.exe

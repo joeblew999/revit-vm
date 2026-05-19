@@ -19,20 +19,22 @@ echo === revit-vm oem/install.bat starting %DATE% %TIME% === > "%LOG%"
 echo Mapping Z: -> \\host.lan\Data >> "%LOG%"
 net use Z: \\host.lan\Data /persistent:yes >> "%LOG%" 2>&1
 
-:: 2. Pre-extract Revit Batch Processor if it's in the shared folder.
-::    Saves you opening Explorer + right-clicking + Extract All inside Windows.
-if exist "Z:\installers\RevitBatchProcessor.zip" (
-  echo Extracting RevitBatchProcessor.zip -> C:\Tools\RBP >> "%LOG%"
-  powershell -NoProfile -Command "Expand-Archive -Force 'Z:\installers\RevitBatchProcessor.zip' 'C:\Tools\RBP'" >> "%LOG%" 2>&1
+:: 2. RBP is staged in Z:\installers\RevitBatchProcessorSetup.exe (by
+::    `mise run software:fetch`) but NOT installed here — RBP needs Revit
+::    already on disk to drop its per-version addins. install-revit.bat
+::    runs the RBP installer after Revit's own setup completes. Just log
+::    presence.
+if exist "Z:\installers\RevitBatchProcessorSetup.exe" (
+  echo RBP installer present in Z:\installers\ — will be run by install-revit.bat after Revit >> "%LOG%"
 ) else (
-  echo RevitBatchProcessor.zip not staged in Z:\installers\ — skipping >> "%LOG%"
+  echo RBP installer not staged yet — run `mise run software:fetch` to bring it down >> "%LOG%"
 )
 
 :: 3. Windows Defender exclusions on hot paths. Real-time scanning of the
 ::    shared folder and the batch-job working areas would kill TCG-already-
 ::    slow throughput.
 echo Adding Defender exclusions >> "%LOG%"
-powershell -NoProfile -Command "Add-MpPreference -ExclusionPath 'Z:\jobs','Z:\output','Z:\installers','C:\Tools\RBP'" >> "%LOG%" 2>&1
+powershell -NoProfile -Command "Add-MpPreference -ExclusionPath 'Z:\jobs','Z:\output','Z:\installers','C:\Program Files\Revit Batch Processor'" >> "%LOG%" 2>&1
 
 :: 4. Don't sleep, don't hibernate, don't blank the screen. A batch VM
 ::    should stay responsive 24x7.

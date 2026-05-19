@@ -43,8 +43,18 @@ if errorlevel 1 (
 )
 
 echo.
-echo Installer exited. Launch Revit from the Start menu to trigger
-echo the one-time Autodesk sign-in (trial registration), then quit.
-echo Back on the Mac: `mise run snapshot:create`.
+echo Revit installer exited. Now installing Revit Batch Processor (RBP)
+echo so it can drop its per-Revit-version addins.
+if exist "\\host.lan\Data\installers\RevitBatchProcessorSetup.exe" (
+    "\\host.lan\Data\installers\RevitBatchProcessorSetup.exe" /VERYSILENT
+) else (
+    echo RBP installer not found at \\host.lan\Data\installers\RevitBatchProcessorSetup.exe
+    echo Run `mise run software:fetch` on the Mac to stage it, then re-run this script.
+)
+
+echo.
+echo Launch Revit from the Start menu to trigger the one-time Autodesk
+echo sign-in (trial registration), then quit. Back on the Mac:
+echo `mise run snapshot:create`.
 pause
 endlocal

@@ -88,11 +88,12 @@ Standing up the VM, snapshotting, signing in to the trial — that's all the eas
 
 Revit doesn't have a proper headless mode. It runs as a desktop app and records every UI action into a **journal file** (`.txt` in `%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit <version>\Journals\`). You can technically replay a journal as input — Revit's `/language` flags accept a journal file — but it's a UI-event log, not a script. Brittle, version-specific, breaks with any UI change.
 
-The community workaround is **Revit Batch Processor** (RBP, github.com/bvn-architecture/RevitBatchProcessor). RBP:
+The community workaround is **Revit Batch Processor** (RBP, https://github.com/bvn-architecture/RevitBatchProcessor). RBP:
 
 1. Generates a fresh journal file per Revit launch that opens the target model.
 2. Embeds Python (IronPython 2.7, runs inside Revit's process) that does the actual export work via Revit's .NET API.
 3. Manages the Revit process lifecycle — launch, wait for completion, kill on timeout, retry.
+4. **Has its own built-in dialog/messagebox suppressor** ("Automatic Revit dialog / message box handling" — per the README). Our `revit-side.py` adds extensions on top, it doesn't replace what RBP already does.
 
 That's why our `operations/revit/export-ifc/` has BOTH a Rust binary (drives RBP from outside) AND a `revit-side.py` (the IronPython code RBP runs inside Revit). The Rust binary does:
 
@@ -101,6 +102,17 @@ That's why our `operations/revit/export-ifc/` has BOTH a Rust binary (drives RBP
 - Tail RBP's log file, parse status, surface failures cleanly to the job runner.
 - Apply timeout + retry policy.
 - Verify the expected output file appeared in the expected location.
+
+### RBP version pinning + the Revit 2027 cliff
+
+- **Pinned to v1.12.1** (Feb 2026) in `installers.txt`. Supports Revit 2015 through Revit 2026.
+- **Maintenance status:** The original author @DanRumery stepped away; the @bvn-architecture org maintains it via community PRs. Last release Feb 2026. Active enough for now — factor in dependency risk if you ever rely heavily on RBP-specific behavior.
+- **Revit 2027 will break mainline RBP.** Revit 2027 ships on .NET 10; the IronPython 2.7.12 RBP embeds is incompatible (issue [bvn-architecture/RevitBatchProcessor#147](https://github.com/bvn-architecture/RevitBatchProcessor/issues/147)). A working fork from `@robmintzes` migrates RBP to IronPython 3.4.2 and has verified Revit 2023–2027 end-to-end: https://github.com/robmintzes/RevitBatchProcessor/tree/feature/revit-2027-support — two commits, not yet merged upstream. When we move to Revit 2027, swap `installers.txt` to that fork's release (or to upstream once they merge it).
+- **Order of install matters.** RBP scans for already-installed Revit versions and drops per-year addins under `%APPDATA%\Autodesk\Revit\Addins\<year>`. Install Revit first, RBP second. `windows-scripts/install-revit.bat` does this in the right order.
+
+### Reference for writing operation scripts
+
+Don't write IronPython for Revit from scratch — start from @jchristel's community sample scripts: https://github.com/jchristel/SampleCodeRevitBatchProcessor/. He's the most active sample-script author in the RBP community.
 
 ### Popups, modals, "Do you want to upgrade this file?"
 
