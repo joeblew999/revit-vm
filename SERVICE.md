@@ -59,7 +59,27 @@ The mise primitives we already built (`vm:up-snap`, `push`, `pull`, `snapshot:cr
 - `oem/install.bat`, `installers.txt`, the cloud-init files — fresh-provision paths still work, used when snapshot needs rebuilding.
 - The `/data` shared folder is where the orchestrator drops `.rvt` files and picks up `.ifc` outputs.
 
-## What's new (would live in a separate repo, e.g. `revit-service`)
+## Where this lives
+
+**In this repo, not a separate one.** The service code, orchestrator, Worker, schema, and mise tasks for both "personal use" (today) and "service mode" (future) all live in `revit-vm`. One mental model, one deploy story, one place to look. The orchestrator and Worker just become more entries in `mise.toml`'s task graph.
+
+Likely additions to the repo layout when service work begins:
+
+```
+revit-vm/
+├── README.md / REVIT.md / SERVICE.md / CLAUDE.md   (already here)
+├── mise.toml             (gains service:* tasks)
+├── cloud-init-*.yaml     (unchanged — VM is still our building block)
+├── oem/install.bat       (gains: install a Windows job-runner scheduled task)
+├── worker/               (NEW — CF Worker source, Rust→WASM)
+├── orchestrator/         (NEW — Bash or small Rust binary for the polling loop)
+├── windows-runner/       (NEW — the in-Windows .bat/PowerShell that watches Z:\jobs\)
+└── schema/               (NEW — D1 migrations)
+```
+
+Service mode is additive to personal mode — daily `mise run start/stop` still works the same way for solo use.
+
+## What's new in this repo
 
 | Component | Role |
 |---|---|
@@ -67,7 +87,7 @@ The mise primitives we already built (`vm:up-snap`, `push`, `pull`, `snapshot:cr
 | **D1 schema** | Job state: `(id, customer_id, rvt_url, params, status, started_at, finished_at, result_url, error)`. |
 | **R2 buckets** | `revit-service-in/<job-id>.rvt`, `revit-service-out/<job-id>.ifc`. Lifecycle rules to expire old artifacts. |
 | **CF Queue or Durable Object** | The orchestrator's input. DO is nicer because it can hold the "last-active timestamp" for the idle-stop decision. |
-| **Orchestrator process** | The lifecycle loop above. Bash or small Rust binary. Runs on a `cax11` always-on box (~€3/mo) — simpler than trying to make a CF Worker SSH out. |
+| **Orchestrator process** | The lifecycle loop above. Bash or small Rust binary. Lives in `orchestrator/` in this repo. Runs on a `cax11` always-on box (~€3/mo) — simpler than trying to make a CF Worker SSH out. |
 | **In-Windows job runner** | A small script inside Windows that watches `Z:\jobs\` (or polls the orchestrator), runs `RevitBatchProcessor.exe -s <job.json>`, drops outputs in `Z:\output\`. Started as a Windows scheduled task at boot via `oem/install.bat`. |
 | **Per-customer config / auth** | Out of scope for v1. Single-tenant with a shared bearer token gets you to "service exists" fast. |
 
@@ -89,16 +109,6 @@ The mise primitives we already built (`vm:up-snap`, `push`, `pull`, `snapshot:cr
 
 You'd price conversions at €X per job (or per minute) with margin. The bottleneck is Revit subscription cost (€428/mo) — that has to be amortized across customers regardless of compute.
 
-## When to move from cpx42 (TCG) to AX41 (KVM) for the service
-
-| Stage | Compute |
-|---|---|
-| Days 1–N: pre-launch, "does this even work" | cpx42 TCG. Slow but cheap. Some jobs may time out — acceptable for proof. |
-| First paying customers, bursty usage | cpx42 TCG. Hourly billing matches bursty volume. |
-| Predictable daily volume — VM up most of every workday | **Hetzner Dedicated AX41-NVMe**. €39/mo flat. ~10× faster per job → throughput goes way up at almost the same cost as cpx42-24×7. |
-| Big enterprise customers / very large models | Per-customer AX41 or Vultr Bare Metal. KVM + better isolation. |
-| Volume justifies it | Investigate **Autodesk Platform Services (APS) Design Automation for Revit** as an alternative to running Revit yourself — Autodesk-hosted, per-cloud-credit billing, no VM to manage. Likely cheaper above some threshold. |
-
 ## Build order (when you're ready)
 
 1. **One Worker route** that accepts a `.rvt` via signed R2 URL and writes a D1 row.
@@ -116,8 +126,20 @@ You'd price conversions at €X per job (or per minute) with margin. The bottlen
 - **Pricing model.** Per-job flat fee? Per-minute? Per-MB-of-input? Defer until you have real customer conversations.
 - **Failure modes.** Revit crash on a malformed input. Trial expired mid-job. VM-side disk full. Orchestrator needs retry logic + clear failure surfacing in the job status row.
 
-## What this means for revit-vm
+## Compute strategy for service mode
 
-Not much. This repo stays focused on "single VM, single user, manual control" and stays the building block. Don't bake service concerns into `mise.toml` — keep the primitives clean. When `revit-service` exists, it'll import or shell out to this repo; the relationship is one-way.
+The hourly-billing options matter much more in service mode than they did for personal use:
 
-If something here turns out to make sense in `revit-vm` for the service later (e.g. an `orchestrator:status` task that other automation can call), pull it back. But not before.
+| Stage | Compute | Why |
+|---|---|---|
+| Pre-launch — internal test, one customer at a time | `cpx42` (TCG) | Pipeline works, jobs run, price is rounding error. Slow per job but volume is tiny. |
+| Early customers, bursty / unpredictable | `cpx42` still — OR `Vultr Bare Metal` hourly KVM if speed matters per job | Hourly billing matches bursty volume on both sides. Vultr is the "hourly KVM" bridge — pay €0.12/hr only when work flows. |
+| Predictable daily volume (VM up most workdays) | `Hetzner Dedicated AX41-NVMe` | €39/mo flat amortizes across many jobs, native speed. The monthly commit is fine once volume is predictable. |
+| Big-enterprise / huge models | Per-customer dedicated host (AX/EX or Vultr) | Isolation + headroom. |
+| Volume justifies it | **APS Design Automation for Revit** | Hand the VM headache to Autodesk. Per-cloud-credit billing. |
+
+The `vm:up-qemu` / `vm:up-kvm` task split we already have maps directly: the orchestrator picks which one based on the target host. Adding a third (`vm:up-vultr` or generalised provider switch) is the only mise change needed to support hourly bare-metal.
+
+## Coexistence with personal use
+
+The repo still works for solo work via `mise run start/stop`. Service mode is opt-in via separate tasks (`service:up`, `service:run`, `service:down`). Personal snapshots and service snapshots can share a Hetzner project or split — likely split when production is real, so a dev mistake on solo work can't blow away a customer-loaded snapshot.

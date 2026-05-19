@@ -32,7 +32,8 @@ That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Win
 | Option | Cost | Commitment | Provisioning |
 |---|---|---|---|
 | **Hetzner Dedicated AX41-NVMe** (`vm:up-kvm`) | **€39 / mo flat**, ~10× faster than cpx42 | 30-day minimum (full-month bill even if you use it briefly) | hours, sometimes manual via Hetzner Robot panel + occasional €39 one-off setup fee |
-| **Vultr Bare Metal E2.med** | **€0.12 / hr** (~€83/mo always-on), native KVM | hourly, no minimum | minutes via API — burst alternative to Hetzner Dedicated |
+| **Vultr Bare Metal** (E2.med etc.) | **€0.12 / hr** (~€83/mo if always-on), native KVM | **hourly, no minimum** — bridge between cpx42 (hourly TCG) and Dedicated (monthly KVM) | minutes via API. The "hourly KVM" sweet spot for bursty production. |
+| **Equinix Metal** / **Latitude.sh** | varies, ~€0.10–0.30 / hr | hourly, no minimum | Same shape as Vultr. Worth pricing for the specific SKU you need — sometimes wins on €/hr or location. |
 | **Local Linux box** you already own | **€0**, native KVM | n/a | already there; needs a residential IP |
 
 **Rules of thumb:**
