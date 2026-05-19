@@ -145,6 +145,7 @@ For real production performance you need either Hetzner Dedicated Root Server (b
 | `oem/install.bat` | Auto-runs ONCE inside Windows at the end of the unattended install on a fresh `vm:up`. Maps Z: → `\\host.lan\Data`, extracts RBP, sets Defender exclusions, disables sleep. Skipped by `vm:up-snap` (snapshot is past that point). |
 | `windows-scripts/install-revit.bat` | Revit-specific helper. See `REVIT.md`. |
 | `REVIT.md` | Autodesk Revit specifics: trial workflow, sign-in, conversion, perf, costs. |
+| `SERVICE.md` | Forward-looking architecture: turning this repo into a "convert-on-demand" SaaS. Not built yet. |
 | `CLAUDE.md` | Context for Claude Code (and any other agent): decisions made, lessons learned, rules. |
 
 ## Don't
