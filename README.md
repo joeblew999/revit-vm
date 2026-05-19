@@ -37,6 +37,25 @@ Per-account auth'd installers (Revit, AutoCAD, Adobe CC):
 
 After installing inside Windows, `mise run stop` snapshots the new state so it survives forever.
 
+### Snapshot retention
+
+`mise run stop` snapshots before destroying the VM, and `snapshot:prune` deletes everything except the newest one. That keeps the bill at ~€0.48/mo idle. The downside: if your *newest* snapshot is broken (e.g. a Windows update corrupted something inside the VM), you've already pruned the previous good copy.
+
+If you want a safety net, pre-set the retention before stopping:
+
+```
+SNAPSHOTS_KEEP=3 mise run stop     # keeps newest 3 instead of 1 — costs ~€1.44/mo idle
+```
+
+Or run prune standalone whenever:
+
+```
+mise run snapshot:list              # see what's there
+SNAPSHOTS_KEEP=3 mise run snapshot:prune    # one-shot adjust retention
+```
+
+Cost is linear: each retained ~40 GB snapshot is ~€0.48/mo. N=3 is a reasonable default once you have real work that you'd hate to lose.
+
 ### Reference — all tasks
 
 `mise tasks` lists them grouped by noun (`vm:*`, `snapshot:*`, `rdp:*`, `software:*`, `files:*`, `token:*`, `trial:*`, `viewer:*`). The four top-level ones (`start`, `stop`, `push`, `pull`) compose them. Granular tasks are there for when you want explicit control (snapshot without destroying, change restart policy, etc.).

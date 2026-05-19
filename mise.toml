@@ -174,13 +174,29 @@ description = "List snapshots in this Hetzner project (newest last). Use `mise r
 run = "fnox exec -- hcloud image list --type snapshot -o columns=id,description,image_size,created"
 
 [tasks."snapshot:prune"]
-description = "Delete all snapshots except the N newest. Default N=1 (paired with stop's snapshot:create — net effect: always exactly 1 snapshot). Override for rollback headroom: `SNAPSHOTS_KEEP=3 mise run snapshot:prune` keeps three. Storage cost scales linearly: each retained snapshot ≈ €0.48/mo at typical revit-vm size."
+description = """
+Delete old snapshots, keep the N newest. Useful because `mise run stop` makes a fresh snapshot every time — without pruning, snapshots accumulate forever at ~€0.48/mo each.
+
+How many to keep is set by the SNAPSHOTS_KEEP env var (default 1):
+  mise run snapshot:prune                    → keeps newest 1   (~€0.48/mo)  — current behavior
+  SNAPSHOTS_KEEP=3 mise run snapshot:prune   → keeps newest 3   (~€1.44/mo)  — gives you rollback if today's snapshot is broken
+
+When would N>1 matter? If a Windows update corrupts something inside the VM, your most recent snapshot is corrupt too. With N=1 you've nuked yesterday's good copy. With N=3 you've got two older known-good fallbacks. Cost is linear in N.
+
+Safe to run any time — never deletes more than (total - N), never deletes the newest.
+"""
 run = '''
 N="${SNAPSHOTS_KEEP:-1}"
 TOTAL=$(fnox exec -- hcloud image list --type snapshot -o json | jq 'length')
-[ "$TOTAL" -le "$N" ] && { echo "have $TOTAL snapshot(s), keeping up to $N — nothing to prune"; exit 0; }
-KEEP_IDS=$(fnox exec -- hcloud image list --type snapshot -o json | jq -r --argjson n "$N" 'sort_by(.created) | .[-$n:] | .[].id')
-echo "keeping newest $N snapshot(s): $(echo $KEEP_IDS | tr '\n' ' ')"
+echo "snapshots in project: $TOTAL, retention target: $N"
+if [ "$TOTAL" -le "$N" ]; then
+  echo "  nothing to do — under the retention limit"
+  exit 0
+fi
+echo "keeping newest $N:"
+fnox exec -- hcloud image list --type snapshot -o json \
+  | jq -r --argjson n "$N" 'sort_by(.created) | .[-$n:] | .[] | "  \(.id)  \(.description)"'
+echo "deleting older $((TOTAL - N)):"
 fnox exec -- hcloud image list --type snapshot -o json \
   | jq -r --argjson n "$N" 'sort_by(.created) | .[0:-$n] | .[].id' \
   | while read ID; do
