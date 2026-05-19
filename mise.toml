@@ -333,6 +333,66 @@ echo "days remaining: $DAYS_LEFT"
 [ "$DAYS_LEFT" -lt 7 ] && echo "⚠  fewer than 7 days left — convert to paid or finish evaluation"
 '''
 
+# ── debug ─────────────────────────────────────────────────────────────────
+# Not part of daily workflow. Reach for these when something seems broken
+# (Windows hangs, ports closed, container restart-looping, etc.).
+
+[tasks."debug:ssh"]
+description = "Open an interactive SSH shell on the host Linux VM as root. Use for poking at docker, /root/windows_storage, /root/windows_shared, cloud-init logs, etc. `exit` to leave."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP"
+'''
+
+[tasks."debug:probe"]
+description = "Quick health check: container state, both mounts, restart policy, ports 22/3389/8006 reachability. Run this first when something seems off."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+KEY="${SSH_KEY_FILE/#~/$HOME}"
+echo "=== VM: $IP ==="
+echo "--- container ---"
+ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" 'bash -s' <<'REMOTE'
+docker ps -a
+echo "restart policy: $(docker inspect windows_batch_processor --format {% raw %}'{{.HostConfig.RestartPolicy.Name}}'{% endraw %})"
+echo "mounts:"
+docker inspect windows_batch_processor --format {% raw %}'{{range .Mounts}}  {{.Source}} -> {{.Destination}}
+{{end}}'{% endraw %}
+REMOTE
+echo "--- external port probes ---"
+nc -z -w 3 "$IP" 22   && echo "22   (SSH):    open" || echo "22   (SSH):    CLOSED"
+nc -z -w 3 "$IP" 8006 && echo "8006 (viewer): open" || echo "8006 (viewer): CLOSED"
+nc -z -w 3 "$IP" 3389 && echo "3389 (RDP):    open" || echo "3389 (RDP):    CLOSED"
+'''
+
+[tasks."debug:logs"]
+description = "Tail the dockur container's stdout (Windows boot/install progress). Add ARG=-f to follow live. Useful when Windows seems stuck mid-boot."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" \
+  "docker logs --tail 40 windows_batch_processor 2>&1"
+'''
+
+[tasks."debug:metrics"]
+description = "Print Hetzner-side metrics for the last 5 min: peak network in/out, CPU avg/peak. Confirms VM is doing real work (vs. wedged) without needing SSH."
+run = '''
+START=$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "5 minutes ago" +%Y-%m-%dT%H:%M:%SZ)
+END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "=== network (bytes/s) ==="
+fnox exec -- hcloud server metrics "$SERVER_NAME" --type network --start "$START" --end "$END" -o json 2>&1 \
+  | jq -r '.metrics.time_series | to_entries[] | "  \(.key): peak=\(.value.values | map(.[1] | tonumber) | max | floor)"'
+echo "=== CPU (%) ==="
+fnox exec -- hcloud server metrics "$SERVER_NAME" --type cpu --start "$START" --end "$END" -o json 2>&1 \
+  | jq -r '.metrics.time_series | to_entries[] | "  \(.key): avg=\(.value.values | map(.[1] | tonumber) | (add/length) | floor)%, peak=\(.value.values | map(.[1] | tonumber) | max | floor)%"'
+'''
+
+[tasks."debug:host-disk"]
+description = "Disk usage on the host VM — sees both the Windows qcow2 (in /root/windows_storage) and the shared folder. Catches 'snapshot will be bigger than expected' early."
+run = '''
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" \
+  "df -h /; echo; du -sh /root/windows_storage /root/windows_shared 2>/dev/null"
+'''
+
 # ── viewer ────────────────────────────────────────────────────────────────
 [tasks."viewer:open"]
 description = "Open dockur's web viewer (port 8006) in the default browser. Works the moment dockur is up — shows Windows install progress, then Windows itself."
