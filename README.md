@@ -130,6 +130,7 @@ For real production performance you need either Hetzner Dedicated Root Server (b
 | `cloud-init-kvm.yaml` | Host bootstrap for KVM-capable hosts (Hetzner Dedicated, other clouds, local) |
 | `installers.txt` | Declarative list of public Windows installers to stage in the shared folder |
 | `windows-scripts/install-revit.bat` | Silent-install template run from inside Windows |
+| `oem/install.bat` | Auto-runs ONCE inside Windows at the end of the unattended install on a fresh `vm:up`. Maps Z: → `\\host.lan\Data`, extracts RBP, sets Defender exclusions, disables sleep, silent-installs Revit if `Revit_Installer.exe` is staged. Skipped by `vm:up-snap` (snapshot is past that point) — so daily use never re-runs it. Greenfield rebuilds are turn-key. |
 
 ## Don't
 
