@@ -2,22 +2,39 @@
 
 Spin up a remote Windows VM that runs Autodesk Revit on Hetzner Cloud, driven entirely by `mise run` tasks. Built on [dockur/windows](https://github.com/dockur/windows) — auto-downloads the Windows ISO, runs unattended setup, exposes a web viewer on port 8006 and RDP on 3389.
 
-## Workflow at a glance
+## Daily workflow — four commands
 
 ```
-mise run token:set              # one-time: stash Hetzner API token in keychain
-mise run vm:up                  # provisions cpx42 in fsn1, starts cloud-init
-mise run rdp:wait               # blocks until Windows is RDP-ready; macOS notification when done
-mise run software:fetch-revit   # VM downloads the Revit installer (set REVIT_INSTALLER_URL in mise.local.toml)
-mise run rdp:open               # land in Windows, run \\host.lan\Data\install-revit.bat, sign into trial
-mise run snapshot:create        # bake Windows + Revit + signed-in trial state
-mise run vm:down                # stop the cost meter
-
-# later sessions in the same 30-day trial
-mise run vm:up-snap             # restore — already signed-in, ready to work
+mise run start            # resume work: provision (from latest snapshot if any), wait for Windows, open RDP
+mise run push -- foo.txt  # send a file from Mac → VM, appears in Windows at \\host.lan\Data\foo.txt
+mise run pull -- foo.txt  # pull \\host.lan\Data\foo.txt → current dir on Mac
+mise run stop             # end work: snapshot, prune older snapshots, destroy VM (cost meter off)
 ```
 
-`mise tasks` lists everything; descriptions explain each step.
+That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Windows install). `stop` always preserves state — `start` next time picks up where you left off.
+
+### First-time setup (once per machine)
+
+```
+mise install              # pulls hcloud + fnox via mise
+mise run token:set        # paste Hetzner API token at hidden prompt (stashed in macOS keychain)
+mise run start            # first run does the ~1hr Windows install; subsequent runs are ~90s
+# RDP credentials: user `Docker`, password `admin`
+```
+
+### Adding software
+
+Public free downloads (RBP, Notepad++, 7-Zip, dev tools):
+- Add a line to `installers.txt`, then `mise run software:fetch` — VM downloads them into the shared folder.
+
+Per-account auth'd installers (Revit, AutoCAD, Adobe CC):
+- Download to your Mac, then `mise run push -- ~/Downloads/Installer.exe`. Or for Revit specifically, put your account-tied URL in `mise.local.toml` and use `mise run software:fetch-revit` (VM-side download, ~10× faster than home upload).
+
+After installing inside Windows, `mise run stop` snapshots the new state so it survives forever.
+
+### Reference — all tasks
+
+`mise tasks` lists them grouped by noun (`vm:*`, `snapshot:*`, `rdp:*`, `software:*`, `files:*`, `token:*`, `trial:*`, `viewer:*`). The four top-level ones (`start`, `stop`, `push`, `pull`) compose them. Granular tasks are there for when you want explicit control (snapshot without destroying, change restart policy, etc.).
 
 ## Costs
 

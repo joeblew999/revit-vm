@@ -24,6 +24,56 @@ TRIAL_STARTED = ""
 # Empty here so committing the file doesn't ship anyone's per-account URL.
 REVIT_INSTALLER_URL = ""
 
+# ╔═════════════════════════════════════════════════════════════════════════╗
+# ║ DAILY USE — these four cover 99% of work. Everything below is granular. ║
+# ╚═════════════════════════════════════════════════════════════════════════╝
+
+[tasks.start]
+description = "RESUME WORK. Provisions a VM (from latest snapshot if one exists, else fresh), waits for Windows to be RDP-ready, opens the RDP client. ~90s from a hot snapshot, ~1hr from scratch."
+run = '''
+if fnox exec -- hcloud image list --type snapshot -o json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+  echo "→ booting from latest snapshot"
+  mise run vm:up-snap
+else
+  echo "→ no snapshot — fresh provision (will take ~1hr for Windows install)"
+  mise run vm:up
+fi
+mise run rdp:wait
+mise run rdp:open
+'''
+
+[tasks.stop]
+description = "END WORK. Snapshots current VM, prunes older snapshots, destroys VM. Cost meter off; next `mise run start` restores everything in ~90s."
+run = '''
+mise run snapshot:create
+mise run snapshot:prune
+mise run vm:down
+'''
+
+[tasks.push]
+description = "Send a local file/dir TO the VM. Usage: `mise run push -- <path>`. Appears inside Windows as \\\\host.lan\\Data\\<basename>."
+run = '''
+push() {
+  [ -z "$1" ] && { echo "usage: mise run push -- <local-path>"; exit 1; }
+  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "$1" "root@$IP:/root/windows_shared/"
+  echo "pushed → \\\\host.lan\\Data\\$(basename "$1")"
+}
+push "$@"
+'''
+
+[tasks.pull]
+description = "Get a file/dir FROM the VM. Usage: `mise run pull -- <name>` where <name> is what's at /root/windows_shared/<name> (the same path Windows sees as \\\\host.lan\\Data\\<name>). File lands in the current dir."
+run = '''
+pull() {
+  [ -z "$1" ] && { echo "usage: mise run pull -- <remote-name>"; exit 1; }
+  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "root@$IP:/root/windows_shared/$1" .
+  echo "pulled ← ./$1"
+}
+pull "$@"
+'''
+
 # ── deps ──────────────────────────────────────────────────────────────────
 [tasks."deps:check"]
 description = "Verify hcloud + fnox are present and HCLOUD_TOKEN is seeded in macOS keychain."
@@ -203,44 +253,20 @@ nc -z -w 3 "$IP" 3389 \
 open "$RDP"
 '''
 
-# ── workspace ─────────────────────────────────────────────────────────────
+# ── files (shared-folder listing — push/pull are at the top) ──────────────
 # Files placed in /root/windows_shared on the VM appear inside Windows as
-# \\host.lan\Data — that's how .rvt files, batch-processor jobs, and outputs
-# move across the Mac↔Windows boundary without RDP click-through.
-[tasks."workspace:push"]
-description = "scp a local file/dir up to the VM's shared folder. Usage: `mise run workspace:push -- <path>` (note the `--`). Lands at /root/windows_shared/<basename>, visible inside Windows as \\\\host.lan\\Data\\<basename>."
-run = '''
-push() {
-  [ -z "$1" ] && { echo "usage: mise run workspace:push -- <local-path>"; exit 1; }
-  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "$1" "root@$IP:/root/windows_shared/"
-  echo "pushed: visible inside Windows at \\\\host.lan\\Data\\$(basename "$1")"
-}
-push "$@"
-'''
-
-[tasks."workspace:pull"]
-description = "scp a file/dir back from the VM's shared folder. Usage: `mise run workspace:pull -- <name>` (note the `--`). Pulls /root/windows_shared/<name> into the current dir."
-run = '''
-pull() {
-  [ -z "$1" ] && { echo "usage: mise run workspace:pull -- <remote-name>"; exit 1; }
-  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "root@$IP:/root/windows_shared/$1" .
-  echo "pulled: ./$1"
-}
-pull "$@"
-'''
-
-[tasks."workspace:ls"]
-description = "List the VM-side shared folder (what's in \\\\host.lan\\Data right now)."
+# \\host.lan\Data. The `push` and `pull` top-level tasks handle the
+# Mac↔VM transfer.
+[tasks."files:ls"]
+description = "List what's in the VM's shared folder right now. Same view Windows sees at \\\\host.lan\\Data."
 run = '''
 IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" "ls -lh /root/windows_shared/{installers,jobs,output}/ 2>/dev/null"
+ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" "find /root/windows_shared -mindepth 1 -maxdepth 2 -printf '%p (%s bytes)\n' 2>/dev/null"
 '''
 
 # ── software ──────────────────────────────────────────────────────────────
 [tasks."software:fetch"]
-description = "Read installers.txt and download every PUBLIC Windows installer listed into /root/windows_shared/installers/ on the VM. Idempotent — already-present files are skipped. Per-account-auth'd installers (Revit, AutoCAD, …) stay out of this list; push those via `mise run workspace:push`."
+description = "Read installers.txt and download every PUBLIC Windows installer listed into /root/windows_shared/installers/ on the VM. Idempotent — already-present files are skipped. Per-account-auth'd installers (Revit, AutoCAD, …) stay out of this list; push those via `mise run push -- <path>`."
 run = '''
 IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
 KEY="${SSH_KEY_FILE/#~/$HOME}"
