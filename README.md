@@ -13,6 +13,17 @@ mise run stop             # end work: snapshot, prune older snapshots, destroy V
 
 That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Windows install). `stop` always preserves state — `start` next time picks up where you left off.
 
+### Cost at a glance
+
+| State | Burn rate |
+|---|---|
+| VM running (`start` → working → no `stop` yet) | **€0.045 / hr** (cpx42 fsn1) |
+| VM stopped, snapshot kept (`stop` complete) | **€0.48 / mo** (one ~40 GB snapshot) |
+| Whole 30-day trial-eval cycle, realistic use | **~€1 total** |
+| Production with paid Revit (~€428/mo subscription dwarfs everything else) | **~€436 / mo** |
+
+Full breakdown + worked examples in the [Costs](#costs) section below.
+
 ### First-time setup (once per machine)
 
 ```
