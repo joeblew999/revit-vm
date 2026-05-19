@@ -23,12 +23,39 @@ A "job" isn't `app + input file`. It's three things stacked:
 
 The operation script is the actual product. The app is plumbing. The customer is paying for *"export-rvt-to-ifc-with-our-rules,"* not *"a Revit on a VM."* This is why two services running the same app can produce very different things — the operation library is what differentiates them.
 
-Where operation scripts live:
+### Operations are Rust binaries, not loose scripts
+
+Each operation is a small Rust crate that compiles to a Windows `.exe` (cross-compiled from Mac to `x86_64-pc-windows-msvc`). The binary is the orchestrator-on-the-Windows-side: it invokes the vendor app, watches stdout/stderr, parses outputs, handles retries and popup suppression. Matches the standing "Rust + Bash, no Python" rule.
+
+For apps that need scripts to be fed into them (Revit's RBP wants Python, AutoCAD wants .scr files), those scripts live next to the Rust source and get embedded into the binary or shipped alongside.
+
+Repo shape per operation:
+
+```
+windows-runner/operations/revit/export-ifc/
+├── Cargo.toml
+├── src/main.rs          ← Rust: invokes RBP, parses output, handles popups
+├── revit-side.py        ← IronPython that RBP runs inside Revit
+├── revit-side.rps       ← RBP settings template
+└── README.md            ← what it does, expected input/output, known failure modes
+```
+
+Build / deploy:
+
+| Step | Where |
+|---|---|
+| `cargo build --release --target x86_64-pc-windows-msvc -p export-ifc` | On Mac (via `cargo-cross` or `rustup target add`). Produces `export-ifc.exe`. |
+| `mise run push -- target/.../export-ifc.exe` for first-time stage, OR `oem/install.bat` copies from `\\host.lan\Data\operations\` on first boot | Windows VM. Lands at `C:\operations\revit\export-ifc\export-ifc.exe`. |
+| Snapshot includes the binaries — `vm:up-snap` brings them back along with everything else | Hetzner |
+
+Snapshot the VM after deploying new operation binaries so future restores have them.
+
+### Where operation source lives
 
 | Source | When |
 |---|---|
-| **`windows-runner/operations/<app>/<operation>.*` in this repo** (curated, versioned) | Default. Common operations we maintain: `revit/export-ifc.py`, `revit/export-pdf.py`, `imagemagick/thumbnail.sh`, etc. Customers reference by name (`operation: "revit/export-ifc"`). |
-| **Customer-supplied** (uploaded with the job) | Power users with proprietary logic. Worker accepts a tarball of scripts alongside the input file; job runner extracts and executes those instead. Higher pricing tier — comes with sandboxing/audit cost. |
+| **`windows-runner/operations/<app>/<operation>/` in this repo** (curated, versioned, Rust+vendor scripts) | Default. The actual product. Each operation is a Rust crate. Customers reference by name (`operation: "revit/export-ifc"`). |
+| **Customer-supplied** (uploaded with the job) | Power users with proprietary logic. Worker accepts a tarball of pre-built `.exe` + companion scripts; job runner extracts and executes. Higher pricing tier — comes with sandboxing/audit cost. **Not v1.** |
 
 Default-first. Don't accept arbitrary customer code at v1 — start with a curated library, expand as customer requests come in.
 
@@ -111,17 +138,25 @@ revit-vm/
 ├── worker/                          (NEW — CF Worker source, Rust→WASM)
 ├── orchestrator/                    (NEW — Bash or small Rust binary for the polling loop)
 ├── windows-runner/                  (NEW — in-Windows side)
-│   ├── main.ps1                     (the dispatcher — picks app + operation, runs it)
-│   └── operations/                  (the actual product — our custom code per job type)
+│   ├── main.ps1                     (thin dispatcher — picks the operation .exe, runs it with job-id)
+│   └── operations/                  (the actual product — Rust workspace)
+│       ├── Cargo.toml               (workspace root)
 │       ├── revit/
-│       │   ├── export-ifc.rps       (RBP settings file)
-│       │   ├── export-ifc.py        (IronPython that RBP invokes per model)
-│       │   ├── export-pdf.rps
-│       │   └── export-pdf.py
+│       │   ├── export-ifc/          (one operation = one crate)
+│       │   │   ├── Cargo.toml
+│       │   │   ├── src/main.rs      (Rust: invokes RBP, suppresses popups, parses output)
+│       │   │   ├── revit-side.py    (IronPython that RBP runs inside Revit)
+│       │   │   └── revit-side.rps   (RBP settings template)
+│       │   └── export-pdf/
+│       │       └── ...
 │       ├── autocad/
-│       │   └── export-pdf.scr
+│       │   └── export-pdf/
+│       │       ├── Cargo.toml
+│       │       └── src/main.rs
 │       └── imagemagick/
-│           └── thumbnail.json       (just the magick CLI args + output spec)
+│           └── thumbnail/
+│               ├── Cargo.toml
+│               └── src/main.rs
 └── schema/                          (NEW — D1 migrations)
 ```
 
@@ -214,7 +249,7 @@ The repo still works for solo work via `mise run start/stop`. Service mode is op
 
 ## Build order (when you're ready)
 
-1. **The first operation script** — `windows-runner/operations/revit/export-ifc.{rps,py}`. This is the actual product. The pipeline is nothing without an operation that does useful work. Write and validate by hand inside the running VM via RDP first — debug there, then commit.
+1. **The first operation** — `windows-runner/operations/revit/export-ifc/` Rust crate + IronPython companion. The actual product. The pipeline is nothing without an operation that does useful work. Write and validate by hand inside the running VM via RDP first — debug Revit's popup whack-a-mole there, then commit. **This is the hardest part of the whole project; see [REVIT.md → "Why Revit batch automation is the hard part"](REVIT.md#why-revit-batch-automation-is-the-hard-part-not-the-vm).**
 2. **In-Windows job runner** (`windows-runner/main.ps1`) that watches `Z:\jobs\` and dispatches one app + one operation. Pre-install via `oem/install.bat` so it survives snapshots and runs at boot.
 3. **One Worker route** that accepts a file via signed R2 URL + `{app: "revit", operation: "export-ifc"}`, writes a D1 row.
 4. **Orchestrator loop** on a `cax11`, Bash first. Polls D1, calls our existing mise tasks, updates D1.

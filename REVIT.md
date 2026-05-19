@@ -80,6 +80,57 @@ VM/storage costs for running this are in [README.md → Costs](README.md#costs).
 
 The Revit subscription dominates everything. Optimising the VM tier is rounding error relative to that.
 
+## Why Revit batch automation is the hard part (not the VM)
+
+Standing up the VM, snapshotting, signing in to the trial — that's all the easy 20%. The 80% is making Revit actually do work unattended without humans clicking dialog boxes. Two layers of pain:
+
+### Journal files
+
+Revit doesn't have a proper headless mode. It runs as a desktop app and records every UI action into a **journal file** (`.txt` in `%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit <version>\Journals\`). You can technically replay a journal as input — Revit's `/language` flags accept a journal file — but it's a UI-event log, not a script. Brittle, version-specific, breaks with any UI change.
+
+The community workaround is **Revit Batch Processor** (RBP, github.com/bvn-architecture/RevitBatchProcessor). RBP:
+
+1. Generates a fresh journal file per Revit launch that opens the target model.
+2. Embeds Python (IronPython 2.7, runs inside Revit's process) that does the actual export work via Revit's .NET API.
+3. Manages the Revit process lifecycle — launch, wait for completion, kill on timeout, retry.
+
+That's why our `operations/revit/export-ifc/` has BOTH a Rust binary (drives RBP from outside) AND a `revit-side.py` (the IronPython code RBP runs inside Revit). The Rust binary does:
+
+- Compose a `.rps` settings file with the target model + the path to `revit-side.py`.
+- Launch `RevitBatchProcessor.exe -s settings.rps`.
+- Tail RBP's log file, parse status, surface failures cleanly to the job runner.
+- Apply timeout + retry policy.
+- Verify the expected output file appeared in the expected location.
+
+### Popups, modals, "Do you want to upgrade this file?"
+
+Revit's worse problem is modal dialogs that block automation entirely:
+
+| Dialog | Cause | Suppression |
+|---|---|---|
+| "File needs to be upgraded to this Revit version" | Opening a model saved in an older Revit | Inside `revit-side.py`: subscribe to `DocumentOpening` event, set `OpeningOptions.AllowOpeningLocalByWrongUser = true` and let Revit upgrade silently. |
+| Worksharing prompts ("Detach from central?") | Opening a workshared model | Set `OpenOptions.DetachFromCentralOption = DetachAndPreserveWorksets` in `revit-side.py` before opening. |
+| "Missing materials/families/links" warnings | Model references files that aren't present | Subscribe to `DialogBoxShowing` event in `revit-side.py`; auto-dismiss known-safe dialogs. |
+| Revit "Welcome" / "What's New" screen on first launch after install | First Revit run | Pre-seed `%APPDATA%\Autodesk\Revit\Autodesk Revit <ver>\UIState.dat` via `oem/install.bat` to mark welcome as seen. |
+| License sign-in expiry prompt | Trial nearing expiry / paid login expired | Real fix is to sign in fresh (manual). For batch jobs: detect via dialog title, fail the job with `license_expired` error code so the orchestrator can surface it instead of hanging. |
+| Worksets selection dialog | Some workshared models | `WorksetConfiguration(WorksetConfigurationOption.OpenAllWorksets)` in `revit-side.py`. |
+| Hardware acceleration / GPU complaints | Revit thinks the GPU is unsupported (always true under TCG, sometimes true under KVM without proper drivers) | Set `Options > Graphics > Use hardware acceleration = false` once during the post-install RDP session; baked into the snapshot. |
+
+The general pattern: **subscribe to `DialogBoxShowing` and `MessageBoxShowing` inside the IronPython code RBP runs**, log every dialog ID that fires, auto-dismiss the known-safe ones. Build the suppression list iteratively as you hit each one on real model inputs.
+
+### Implications for the operation
+
+A real Revit operation isn't just "convert RVT to IFC." It's:
+
+1. Open the model with the right `OpenOptions` to avoid the upgrade/detach/worksets dialogs.
+2. Subscribe to dialog events, auto-dismiss the known-safe set, log everything else.
+3. Run the actual export (`document.Export(...)` for IFC, `document.Print(...)` for PDF, etc.).
+4. Close the document cleanly.
+5. Exit Revit cleanly (without leaving a zombie process).
+6. The Rust outer binary watches all of this, applies timeouts, reports per-step status.
+
+Build this iteratively. First operation = export-ifc on a single known-good test model. Add dialog suppressions as new models break it. Don't try to handle every possible dialog upfront — the list is long and most won't fire on typical inputs.
+
 ## Files specific to Revit
 
 | File | Purpose |
