@@ -110,6 +110,20 @@ That's why our `operations/revit/export-ifc/` has BOTH a Rust binary (drives RBP
 - **Revit 2027 will break mainline RBP.** Revit 2027 ships on .NET 10; the IronPython 2.7.12 RBP embeds is incompatible (issue [bvn-architecture/RevitBatchProcessor#147](https://github.com/bvn-architecture/RevitBatchProcessor/issues/147)). A working fork from `@robmintzes` migrates RBP to IronPython 3.4.2 and has verified Revit 2023–2027 end-to-end: https://github.com/robmintzes/RevitBatchProcessor/tree/feature/revit-2027-support — two commits, not yet merged upstream. When we move to Revit 2027, swap `installers.txt` to that fork's release (or to upstream once they merge it).
 - **Order of install matters.** RBP scans for already-installed Revit versions and drops per-year addins under `%APPDATA%\Autodesk\Revit\Addins\<year>`. Install Revit first, RBP second. `windows-scripts/install-revit.bat` does this in the right order.
 
+### Personal use doesn't need Rust — RBP runs Python directly
+
+When prototyping, exploring, or just running one-off batch jobs inside RDP, you don't compile anything:
+
+```
+BatchRvt.exe -s settings.rps    # settings.rps points at your .py
+```
+
+You write IronPython 2.7, edit, re-run. That's the whole loop. Quick.
+
+The Rust operation crates ([SERVICE.md](SERVICE.md)) are **only** needed for service mode — when the orchestrator needs structured args (`--job-id / --input / --output`), structured event emission to Cloudflare, retry semantics, and a stable .exe interface that survives Revit version bumps. None of that matters for "I'm trying to see if Revit can export this model to IFC."
+
+Practical implication: when adding a new Revit operation, write the IronPython first (validate by hand via RDP), commit it, **then** wrap it in a Rust crate for service mode. Don't wrap until the Python is proven on real models.
+
 ### Reference: the @jchristel ecosystem
 
 @jchristel (Jan Christel) is the active community lead in the RBP space since @DanRumery stepped away. His repos are the most useful prior art for writing real operations:

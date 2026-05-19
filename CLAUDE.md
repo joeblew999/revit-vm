@@ -80,6 +80,7 @@ When in doubt before any destructive-sounding action: `mise run snapshot:list` s
 - **The `/oem/install.bat` mechanism has reports of recent flakiness** ([dockur/windows#1433](https://github.com/dockur/windows/issues/1433)) where commands silently get skipped. Log everything to `C:\OEM\install.log` (which is accessible via `Z:\install.log` from the host) so you can see what actually ran. The current `oem/install.bat` does this.
 - **`hcloud server create-image` takes the server name POSITIONALLY**, not via `--server`. `--server` worked in older hcloud CLI versions but was removed. Current invocation in `snapshot:create`: `hcloud server create-image --type snapshot --description "..." "$SERVER_NAME"`.
 - **`workspace:ls` was renamed to `files:ls`** during the UX collapse to 4 daily commands. `files:ls` now uses `find` instead of listing only 3 hardcoded subdirs, so top-level files (like `install-revit.bat`) show up too.
+- **Hot snapshot of running TCG Windows is unbounded.** `mise run stop` previously called `snapshot:create` on a running VM and ate 40+ min when Windows was actively writing dirty pages under QEMU/TCG. Caught live 2026-05-19. Fix: `stop` now does `docker stop --timeout=120 windows_batch_processor` over SSH FIRST, then snapshots a quiescent disk (~60s). Standalone `snapshot:create` stays hot (its docstring already warned to shut Windows down first); `stop` automates the shutdown. **Don't remove the clean-shutdown step from `stop`** — putting it back to hot snapshot is a 40-min landmine.
 
 ## Stack details
 

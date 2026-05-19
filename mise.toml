@@ -44,9 +44,14 @@ mise run rdp:open
 '''
 
 [tasks.stop]
-description = "END WORK. Snapshots current VM, prunes older snapshots, destroys VM. Cost meter off; next `mise run start` restores everything in ~90s. ABORTS if the snapshot fails — your work is never destroyed without first being saved."
+description = "END WORK. Clean-shuts Windows first (ACPI via `docker stop --timeout=120`), then snapshots, prunes older snapshots, destroys VM. Guaranteed ~3 min total — without the clean-shutdown the snapshot can hang for tens of minutes on hot dirty pages. Cost meter off; next `mise run start` restores everything in ~90s. ABORTS if any step fails — your work is never destroyed without first being saved."
 run = '''
 set -e
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+KEY="${SSH_KEY_FILE/#~/$HOME}"
+echo "→ clean-shutting Windows (ACPI via docker stop, up to 120s)"
+ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
+  "docker stop --timeout=120 windows_batch_processor"
 mise run snapshot:create
 mise run snapshot:prune
 mise run vm:down
