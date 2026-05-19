@@ -13,12 +13,31 @@ Revit is the **first** application, not the only one. The pipeline is app-agnost
 
 The mise primitives we already built (`vm:up-snap`, `push`, `pull`, `snapshot:create`, `vm:down`, etc.) **are the verbs the service orchestrator calls.** No rewrite — a thin layer on top.
 
+## Three layers per job (the load-bearing thing this section explains)
+
+A "job" isn't `app + input file`. It's three things stacked:
+
+1. **The vendor app** (Revit, AutoCAD, ImageMagick, …) — pre-installed in the snapshot. App by itself does nothing.
+2. **An operation script** (.rps + .py for Revit Batch Processor, .scr/.lsp for AutoCAD accoreconsole, magick CLI args for ImageMagick) — this is **our custom code** and it tells the app what to do. Every job needs one. No exceptions.
+3. **The job's input file + params** — supplied per call.
+
+The operation script is the actual product. The app is plumbing. The customer is paying for *"export-rvt-to-ifc-with-our-rules,"* not *"a Revit on a VM."* This is why two services running the same app can produce very different things — the operation library is what differentiates them.
+
+Where operation scripts live:
+
+| Source | When |
+|---|---|
+| **`windows-runner/operations/<app>/<operation>.*` in this repo** (curated, versioned) | Default. Common operations we maintain: `revit/export-ifc.py`, `revit/export-pdf.py`, `imagemagick/thumbnail.sh`, etc. Customers reference by name (`operation: "revit/export-ifc"`). |
+| **Customer-supplied** (uploaded with the job) | Power users with proprietary logic. Worker accepts a tarball of scripts alongside the input file; job runner extracts and executes those instead. Higher pricing tier — comes with sandboxing/audit cost. |
+
+Default-first. Don't accept arbitrary customer code at v1 — start with a curated library, expand as customer requests come in.
+
 ## Architecture
 
 ```
    ┌─────────────────────────────────────────────────────────┐
    │  customer                                               │
-   │  POST /jobs  { app, input_url, output_format, params }  │
+   │  POST /jobs  { app, operation, input_url, params }      │
    │              → 202 + job-id                             │
    │  GET  /jobs/:id  → status, result URL                   │
    │  webhook on completion (optional)                       │
@@ -26,7 +45,7 @@ The mise primitives we already built (`vm:up-snap`, `push`, `pull`, `snapshot:cr
                             ▼
    ┌─────────────────────────────────────────────────────────┐
    │  CF Worker (Rust→WASM, Hono+Zod)         your stack     │
-   │  - validates input + checks `app` is supported          │
+   │  - validates `app` + `operation` against repo's library │
    │  - signs an R2 upload URL                               │
    │  - writes job row in D1                                 │
    │  - enqueues on CF Queue / Durable Object                │
@@ -57,10 +76,20 @@ The mise primitives we already built (`vm:up-snap`, `push`, `pull`, `snapshot:cr
    │                                                          │
    │  In-Windows job runner (`windows-runner/main.ps1`):     │
    │    watches Z:\jobs\<job-id>.json                        │
+   │    resolves the operation script — copied into          │
+   │    Z:\operations\<app>\ at boot from the repo's         │
+   │    windows-runner/operations/ directory (or extracted   │
+   │    from a customer-supplied tarball for advanced tier)  │
    │    dispatches by `app`:                                 │
-   │      revit       → RevitBatchProcessor.exe …            │
-   │      autocad     → accoreconsole.exe …                  │
-   │      imagemagick → magick convert …                     │
+   │      revit       → RevitBatchProcessor.exe              │
+   │                    -s <export-ifc.rps>                  │
+   │                    -t <export-ifc.py>                   │
+   │                    --revit-file <input.rvt>             │
+   │      autocad     → accoreconsole.exe                    │
+   │                    /i <input.dwg>                       │
+   │                    /s <export-pdf.scr>                  │
+   │      imagemagick → magick convert <input>               │
+   │                    <args-from-operation> <output>       │
    │      <new app>   → add a case statement                 │
    │    writes Z:\output\<job-id>.<ext>                      │
    └─────────────────────────────────────────────────────────┘
@@ -79,10 +108,21 @@ revit-vm/
 ├── mise.toml             (gains service:* tasks)
 ├── cloud-init-*.yaml     (unchanged — VM is still our building block)
 ├── oem/install.bat       (gains: install the Windows job-runner scheduled task)
-├── worker/               (NEW — CF Worker source, Rust→WASM)
-├── orchestrator/         (NEW — Bash or small Rust binary for the polling loop)
-├── windows-runner/       (NEW — in-Windows .ps1 that dispatches by `app`)
-└── schema/               (NEW — D1 migrations)
+├── worker/                          (NEW — CF Worker source, Rust→WASM)
+├── orchestrator/                    (NEW — Bash or small Rust binary for the polling loop)
+├── windows-runner/                  (NEW — in-Windows side)
+│   ├── main.ps1                     (the dispatcher — picks app + operation, runs it)
+│   └── operations/                  (the actual product — our custom code per job type)
+│       ├── revit/
+│       │   ├── export-ifc.rps       (RBP settings file)
+│       │   ├── export-ifc.py        (IronPython that RBP invokes per model)
+│       │   ├── export-pdf.rps
+│       │   └── export-pdf.py
+│       ├── autocad/
+│       │   └── export-pdf.scr
+│       └── imagemagick/
+│           └── thumbnail.json       (just the magick CLI args + output spec)
+└── schema/                          (NEW — D1 migrations)
 ```
 
 Service mode is additive to personal mode — daily `mise run start/stop` still works the same way for solo use.
@@ -126,8 +166,15 @@ Adding a new app to the service:
 2. Write `<APP>.md` covering install method, license model, perf reality, costs.
 3. Add the installer to `installers.txt` (if public) or a `software:fetch-<app>` task (if account-tied).
 4. Add a dispatch case in `windows-runner/main.ps1` for the app's CLI invocation.
-5. Add `<app>` to the Worker's accepted-app list and validation.
-6. Test end-to-end with one job. Snapshot.
+5. **Write the first operation script(s)** under `windows-runner/operations/<app>/`. Without an operation, the app is plumbing with nothing to do. Start with the simplest one customers would actually ask for.
+6. Add `<app>` to the Worker's accepted-app + accepted-operation lists.
+7. Test end-to-end with one job. Snapshot.
+
+Adding a new operation to an existing app (cheaper than adding a new app):
+
+1. Write the operation script under `windows-runner/operations/<app>/<name>.*`.
+2. Add `<name>` to the Worker's accepted-operations list for that app.
+3. Test. Snapshot if the script is heavy enough to need staging (most aren't — they're tiny text files baked into the snapshot via `oem/install.bat`).
 
 ## Cost model — flips from "VM rent" to "per-conversion"
 
@@ -167,13 +214,16 @@ The repo still works for solo work via `mise run start/stop`. Service mode is op
 
 ## Build order (when you're ready)
 
-1. **One Worker route** that accepts a file via signed R2 URL, writes a D1 row with `app="revit"` hardcoded.
-2. **Orchestrator loop** on a `cax11`, in Bash first. Polls D1, calls our existing mise tasks, updates D1.
-3. **In-Windows job runner** for Revit — start with the simplest dispatch (one app, one output format). Pre-install via `oem/install.bat` so it's there on every fresh provision and survives snapshots.
-4. **Idle-stop timer** in the orchestrator.
-5. **One real customer or test scenario end-to-end.** Manual debugging.
-6. **Second app** (probably ImageMagick or ffmpeg — free, fast, validates the per-app dispatch shape).
-7. **Multi-tenancy + billing** — once 1-6 work cleanly. Don't do this earlier; it'll guide design choices best when there's a real customer relationship.
+1. **The first operation script** — `windows-runner/operations/revit/export-ifc.{rps,py}`. This is the actual product. The pipeline is nothing without an operation that does useful work. Write and validate by hand inside the running VM via RDP first — debug there, then commit.
+2. **In-Windows job runner** (`windows-runner/main.ps1`) that watches `Z:\jobs\` and dispatches one app + one operation. Pre-install via `oem/install.bat` so it survives snapshots and runs at boot.
+3. **One Worker route** that accepts a file via signed R2 URL + `{app: "revit", operation: "export-ifc"}`, writes a D1 row.
+4. **Orchestrator loop** on a `cax11`, Bash first. Polls D1, calls our existing mise tasks, updates D1.
+5. **Idle-stop timer** in the orchestrator.
+6. **One real customer or test scenario end-to-end.** Manual debugging.
+7. **Second operation, same app** (Revit export-pdf) — proves the operation library shape with low risk.
+8. **Second app** (probably ImageMagick or ffmpeg — free, fast, validates the per-app dispatch shape).
+9. **Multi-tenancy + billing** — once 1–8 work cleanly. Don't do this earlier; it'll guide design choices best when there's a real customer relationship.
+10. **Customer-supplied operation tarballs** — only if customers actually ask. Adds sandboxing and audit cost; skip until demand is real.
 
 ## Open questions (don't resolve until needed)
 
