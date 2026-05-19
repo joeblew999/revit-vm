@@ -29,17 +29,20 @@ That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Win
 
 **If you want native KVM speed (eventual production):**
 
-| Option | You pay |
-|---|---|
-| Hetzner Dedicated AX41-NVMe (`vm:up-kvm`, monthly contract) | **€39 / mo flat**, fast |
-| Vultr Bare Metal E2.med (hourly bare-metal) | **€0.12 / hr** or ~€83/mo always-on |
-| Local Linux box you already own | **€0**, fast, but needs a residential IP |
+| Option | Cost | Commitment | Provisioning |
+|---|---|---|---|
+| **Hetzner Dedicated AX41-NVMe** (`vm:up-kvm`) | **€39 / mo flat**, ~10× faster than cpx42 | 30-day minimum (full-month bill even if you use it briefly) | hours, sometimes manual via Hetzner Robot panel + occasional €39 one-off setup fee |
+| **Vultr Bare Metal E2.med** | **€0.12 / hr** (~€83/mo always-on), native KVM | hourly, no minimum | minutes via API — burst alternative to Hetzner Dedicated |
+| **Local Linux box** you already own | **€0**, native KVM | n/a | already there; needs a residential IP |
 
 **Rules of thumb:**
 
-- Daily use under 20 hr/week → stick with `cpx42` (TCG), pay €1–€5/mo total.
-- Real batch throughput / Revit at decent speed → Hetzner Dedicated AX41, €39/mo flat.
-- "Software fee" (Revit subscription, etc.) is a separate line — see [REVIT.md](REVIT.md). For Revit specifically, the €428/mo subscription dwarfs everything in the table above.
+- **Under ~20 hr/week, bursty, no commitment** → `cpx42` (TCG), €1–5/mo. Daily use cpx42 wins on price even if you wish it were faster.
+- **You need speed AND you'll use it most of a month** → Hetzner Dedicated AX41, €39/mo. The €11 premium over cpx42-24×7 buys ~10× the throughput.
+- **You need speed but only for a few days at a time** → Vultr Bare Metal hourly, €0.12/hr. Worse than AX41 if you'll use it most of the month, better if you won't commit.
+- **You already own a Linux box** → just use it. €0.
+
+App-specific costs (Revit subscription, etc.) are a separate line — see [REVIT.md](REVIT.md). For Revit specifically, the €428/mo subscription dwarfs every option in the tables above.
 
 Detailed price tables below if you want to do the arithmetic yourself.
 
