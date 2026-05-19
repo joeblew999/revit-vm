@@ -19,8 +19,13 @@ That's it. `start` is ~90s when a snapshot exists, ~1hr the very first time (Win
 mise install              # pulls hcloud + fnox via mise
 mise run token:set        # paste Hetzner API token at hidden prompt (stashed in macOS keychain)
 mise run start            # first run does the ~1hr Windows install; subsequent runs are ~90s
-# RDP credentials: user `Docker`, password `admin`
 ```
+
+**RDP login**: user `Docker`, password `admin` (dockur defaults — `mise run rdp:open` prefills the username; type the password when the client asks).
+
+**Optional local overrides** in `mise.local.toml` (gitignored — copy from `mise.local.toml.example`):
+- `REVIT_INSTALLER_URL` — your per-account Autodesk download URL, used by `mise run software:fetch-revit`
+- `TRIAL_STARTED` — ISO date, makes `mise run trial:remind` count down to expiry
 
 ### Adding software
 

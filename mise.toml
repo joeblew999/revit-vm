@@ -31,6 +31,7 @@ REVIT_INSTALLER_URL = ""
 [tasks.start]
 description = "RESUME WORK. Provisions a VM (from latest snapshot if one exists, else fresh), waits for Windows to be RDP-ready, opens the RDP client. ~90s from a hot snapshot, ~1hr from scratch."
 run = '''
+set -e
 if fnox exec -- hcloud image list --type snapshot -o json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
   echo "→ booting from latest snapshot"
   mise run vm:up-snap
@@ -43,8 +44,9 @@ mise run rdp:open
 '''
 
 [tasks.stop]
-description = "END WORK. Snapshots current VM, prunes older snapshots, destroys VM. Cost meter off; next `mise run start` restores everything in ~90s."
+description = "END WORK. Snapshots current VM, prunes older snapshots, destroys VM. Cost meter off; next `mise run start` restores everything in ~90s. ABORTS if the snapshot fails — your work is never destroyed without first being saved."
 run = '''
+set -e
 mise run snapshot:create
 mise run snapshot:prune
 mise run vm:down
