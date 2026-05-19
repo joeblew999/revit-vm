@@ -442,7 +442,11 @@ python -m py_compile $files && echo "syntax ok: $files"
 
 [tasks."python:lint"]
 description = "Lint every IronPython operation script on the Mac via `uvx ruff check`. Style + dead code + obvious bugs. Configured in pyproject.toml to ignore Revit-specific import patterns. Fast — <2s."
-run = "uvx ruff check windows-runner"
+run = "uvx ruff check windows-runner tests"
+
+[tasks."python:test"]
+description = "Run every operation script on the Mac with mocked Revit modules (tests/revit_mocks.py). Won't catch Revit API behaviour mistakes, but DOES catch typos / wrong attribute names / missing imports / wrong arg counts. Pass here means the script structure is sound; real validation still needs RDP."
+run = "python tests/run.py"
 
 [tasks."debug:host-disk"]
 description = "Disk usage on the host VM — sees both the Windows qcow2 (in /root/windows_storage) and the shared folder. Catches 'snapshot will be bigger than expected' early."
