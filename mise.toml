@@ -55,6 +55,8 @@ fnox exec -- hcloud server create \
   --location "$SERVER_LOCATION" \
   --ssh-key "$SSH_KEY" \
   --user-data-from-file cloud-init-qemu.yaml
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME" 2>/dev/null) && \
+  ssh-keygen -R "$IP" >/dev/null 2>&1 || true
 '''
 
 [tasks."vm:up-kvm"]
@@ -67,6 +69,8 @@ fnox exec -- hcloud server create \
   --location "$SERVER_LOCATION" \
   --ssh-key "$SSH_KEY" \
   --user-data-from-file cloud-init-kvm.yaml
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME" 2>/dev/null) && \
+  ssh-keygen -R "$IP" >/dev/null 2>&1 || true
 '''
 
 [tasks."vm:up-snap"]
@@ -84,6 +88,8 @@ fnox exec -- hcloud server create \
   --image "$SNAP_ID" \
   --location "$SERVER_LOCATION" \
   --ssh-key "$SSH_KEY"
+IP=$(fnox exec -- hcloud server ip "$SERVER_NAME" 2>/dev/null) && \
+  ssh-keygen -R "$IP" >/dev/null 2>&1 || true
 '''
 
 [tasks."vm:down"]
