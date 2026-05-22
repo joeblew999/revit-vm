@@ -32,6 +32,8 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 
 13. **`job spawn` for long polling loops.** `rdp-wait.nu` and `providers/vultr/snapshot-create.nu` both had `mut elapsed / sleep 30sec` busy-wait loops. Replaced with `job spawn { ... | job send 0 }` + `job recv --timeout`. The job mailbox pattern is idiomatic nushell 0.112+ and plays well with the MCP server's auto-promotion.
 
+14. **Compose primitives, don't wrap them.** The stack is layered — mise / pitchfork / nushell / http-nu / xs / Datastar / JSONL — and each layer already provides the glue the next would otherwise reinvent. Before writing a helper, parser, or detach wrapper, check the layer below: there's almost always a built-in command, an existing task, or a well-defined contract you can compose with. New abstractions are a tax; primitive composition is free. When in doubt, prefer reading the docs / the sibling repo's serve.nu / the binary's `--help` over inventing.
+
 ## Don't
 
 - Don't put account-tied URLs (Autodesk installer, etc.) here — they belong in vm-software's `mise.local.toml`.
