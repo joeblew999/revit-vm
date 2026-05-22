@@ -26,6 +26,11 @@ def write_event [event: record] {
     # JSONL requires a newline between records — `save -a` does not add one.
     let line = ($enriched | to json -r)
     $"($line)\n" | save -a state/vms.jsonl
+    # Publish to xs when the store is running — powers the GUI SSE stream and
+    # lets MCP clients tail live lifecycle events without polling the JSONL file.
+    if ($env.XS_ADDR? | is-not-empty) {
+        $line | ^xs append $env.XS_ADDR vm.lifecycle
+    }
 }
 
 def "main provisioned" [

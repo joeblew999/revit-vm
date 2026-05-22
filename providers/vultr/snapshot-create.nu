@@ -95,23 +95,32 @@ if $snap_id == null {
 print $"  Vultr snapshot id: ($snap_id) — polling for ready..."
 
 # Step 6: poll until complete.
-mut waited = 0
-let max_wait = 60 * 60
-loop {
-    let get = (^fnox exec --if-missing ignore -- vultr-cli snapshot get $snap_id -o json | from json)
-    let status = ($get.snapshot?.status? | default "unknown")
-    if $status == "complete" {
-        print $"  ready after ($waited)s"
-        break
+job spawn --description "vultr-snapshot-poll" {
+    mut waited = 0
+    let max_wait = 60 * 60
+    loop {
+        let get = (^fnox exec --if-missing ignore -- vultr-cli snapshot get $snap_id -o json | from json)
+        let status = ($get.snapshot?.status? | default "unknown")
+        if $status == "complete" {
+            {status: "complete", waited: $waited} | job send 0
+            return
+        }
+        if $waited > $max_wait {
+            {status: "timeout", waited: $waited} | job send 0
+            return
+        }
+        sleep 30sec
+        $waited = $waited + 30
+        print $"  status=($status), waited ($waited)s"
     }
-    if $waited > $max_wait {
-        print -e $"timed out at ($waited)s — current status: ($status)"
-        exit 1
-    }
-    sleep 30sec
-    $waited = $waited + 30
-    print $"  status=($status), waited ($waited)s"
 }
+
+let poll = (job recv --timeout 61min)
+if $poll.status != "complete" {
+    print -e $"timed out at ($poll.waited)s — check Vultr dashboard for snapshot ($snap_id)"
+    exit 1
+}
+print $"  ready after ($poll.waited)s"
 
 # Step 7: cleanup R2 transit object.
 print "→ deleting R2 transit object (Vultr has its own copy now)..."

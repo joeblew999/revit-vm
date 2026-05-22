@@ -1,5 +1,7 @@
 mise.local.toml
 .DS_Store
+# xs binary store — runtime only, not committed (durable state is state/vms.jsonl)
+state/xs.store/
 *.png
 *.jpg
 *.jpeg

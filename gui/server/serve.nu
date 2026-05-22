@@ -128,6 +128,16 @@ def render-status-board [] {
             ^nu state/runs.nu --json
         }
         ["GET", "/api/vms-fragment"]  => { vms-fragment-render }
+        ["GET", "/api/events"]        => {
+            # Live SSE stream of vm.lifecycle events from xs. Bridges the MCP
+            # actor (writes) and the GUI actor (reads) without polling.
+            # Requires `mise run xs:serve:bg` to be running.
+            if ($env.XS_ADDR? | is-empty) {
+                "XS_ADDR not set — run `mise run xs:serve:bg` first\n"
+            } else {
+                ^xs cat --follow --sse --topic vm.lifecycle $env.XS_ADDR
+            }
+        }
         _ => { $"not found: ($method) ($path)\n" }
     }
 }

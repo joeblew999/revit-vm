@@ -18,9 +18,19 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 
 6. **All task defs in root `mise.toml`.** Subfolder `mise.toml`s don't expose tasks to root without mise's experimental monorepo mode that breaks the 4-command UX. Tried 2026-05-22, rolled back. Encapsulation lives in per-stage folders' `.nu` files instead.
 
-7. **Tools are binary-only, no compilers needed.** `hcloud`, `vultr-cli`, `aws`, `fnox`, `nushell`, `pitchfork`, `http-nu`, `xs`. `http-nu` + `xs` install via mise's `github:` backend from the `joeblew999/*` forks (relay-url branch — adds iroh-relay support for FS sync). Upstream `cablehead/*` doesn't yet ship release binaries. Goal: any clone → `mise install` → working repo, no compilers, no cargo, no curl-piped install scripts.
+7. **Tools are binary-only, no compilers needed.** `hcloud`, `vultr-cli`, `aws`, `fnox`, `nushell`, `pitchfork`, `http-nu`, `xs`, `yoke`. `http-nu` + `xs` install via mise's `github:` backend from the `joeblew999/*` forks (relay-url branch — adds iroh-relay support for FS sync). `yoke` installs from `cablehead/yoke` directly (ships release binaries). Goal: any clone → `mise install` → working repo, no compilers, no cargo, no curl-piped install scripts.
 
 8. **fnox + mise for secrets.** Pointer table in `fnox.toml` maps env-var names to keychain items; `fnox set -p keychain <KEY>` writes; `fnox exec --if-missing ignore -- <cmd>` injects at runtime. `--if-missing ignore` is mandatory so missing other-provider secrets don't warn on every command.
+
+9. **MCP server via `nu --mcp`.** `mise run mcp:serve` turns vm-servers into an MCP server (stdio) that Claude Desktop / Claude Code can drive directly. The `evaluate` tool gives the client a full nushell REPL with CWD=repo root. Long-running ops (Vultr snapshot, `rdp:wait`) auto-promote to background jobs after 10 s; the client calls `job recv` when ready.
+
+10. **yoke for AI agent turns.** `mise run ai:ask -- 'prompt'` drives one LLM turn to completion via `yoke` (cablehead — same ecosystem as `http-nu` + `xs`). `--tools nu` gives the model an embedded nushell engine; `--config mcp/init.nu` pre-loads `vm-state`, `vm-ip`, `vm-runs` wrappers. Output is JSONL — pipe to `tee { save }` for session replay. Sessions will eventually move to xs. Both `mcp:serve` and `ai:ask` use `job spawn` inside long-running `.nu` scripts so neither blocks the caller.
+
+11. **xs as the event bus between actors.** GUI (`gui:serve`) and MCP (`mcp:serve`) are two actors on the same system — human-facing and AI-facing respectively. Both read `state/vms.jsonl` for durable history. `xs` is the live channel: `state/append.nu` writes every lifecycle event to `xs append $XS_ADDR vm.lifecycle`; `gui:serve` tails it via `xs cat --follow --sse` at `/api/events`. Start the store with `mise run xs:serve:bg`. Set `XS_ADDR` to an iroh relay URL in `mise.local.toml` to sync across machines (the `joeblew999/xs` fork carries the relay-url branch).
+
+12. **Self-evolution via iroh + no compile phase.** All logic is in `.nu` files — no build step. The `joeblew999/*` forks of `http-nu` and `xs` include iroh-relay support, which converges the file systems of all git-cloned instances automatically. An AI actor (MCP or yoke) can modify a `.nu` file and that change propagates to every running instance without restarts or redeployment. The binary tools are pinned in `mise.toml`; the logic layer is fluid. This is intentional — treat it as a capability, not a risk.
+
+13. **`job spawn` for long polling loops.** `rdp-wait.nu` and `providers/vultr/snapshot-create.nu` both had `mut elapsed / sleep 30sec` busy-wait loops. Replaced with `job spawn { ... | job send 0 }` + `job recv --timeout`. The job mailbox pattern is idiomatic nushell 0.112+ and plays well with the MCP server's auto-promotion.
 
 ## Don't
 

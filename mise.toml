@@ -68,6 +68,14 @@ VM_SOFTWARE_REPO = ""
 HTTP_NU_ADDR = "127.0.0.1:8080"
 REFRESH_INTERVAL_SEC = "10"
 
+# xs event store — shared event bus between GUI (human actor) and MCP (AI actor).
+# XS_ADDR: address xs clients connect to. TCP [HOST]:PORT or Unix socket PATH.
+# XS_STORE: path where xs persists the event stream (committed alongside vms.jsonl).
+# Override XS_ADDR in mise.local.toml to an iroh relay URL for multi-machine sync;
+# the joeblew999/xs fork adds relay support so all clones converge automatically.
+XS_ADDR  = "127.0.0.1:2619"
+XS_STORE = "{{config_root}}/state/xs.store"
+
 # ╔═════════════════════════════════════════════════════════════════════════╗
 # ║ DAILY USE — these four cover 99% of work. Everything below is granular. ║
 # ╚═════════════════════════════════════════════════════════════════════════╝
@@ -119,9 +127,24 @@ run = "http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
 description = "Same as `gui:serve` but under pitchfork so it survives this shell. Use for the deployed instance."
 run = "pitchfork run vm-servers-gui -- http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
 
+[tasks."xs:serve"]
+description = "Start the xs event store. GUI and MCP both append/tail via XS_ADDR. Override XS_ADDR in mise.local.toml with an iroh relay URL for multi-machine sync (joeblew999/xs fork)."
+run = "xs serve $XS_STORE --expose $XS_ADDR"
+dir = "{{config_root}}"
+
+[tasks."xs:serve:bg"]
+description = "Same as xs:serve but under pitchfork — survives the shell."
+run = "pitchfork run vm-servers-xs -- xs serve $XS_STORE --expose $XS_ADDR"
+dir = "{{config_root}}"
+
+[tasks."dev"]
+description = "Start the full local stack (xs event store + GUI web server). Both survive the shell via pitchfork. Open http://$HTTP_NU_ADDR. Stop with: pitchfork stop vm-servers-xs && pitchfork stop vm-servers-gui."
+run = "mise run xs:serve:bg && mise run gui:serve:bg && echo 'Stack up → http://$HTTP_NU_ADDR  (xs @ $XS_ADDR)'"
+dir = "{{config_root}}"
+
 [tasks."mcp:serve"]
 description = "Nushell MCP server (stdio). Exposes a full nushell REPL so Claude Desktop / Claude Code can drive mise tasks directly. Long-running ops (snapshot, rdp:wait) auto-promote to background jobs."
-run = "nu --mcp"
+run = "nu --mcp --config mcp/init.nu"
 dir = "{{config_root}}"
 
 [tasks."ai:ask"]
