@@ -1,6 +1,6 @@
 # Parse-check every .nu file in the repo using nushell's built-in
 # `nu-check` command directly (no subprocess per file). Same script
-# runs from `mise run check:syntax` locally and in CI.
+# runs from `mise run ci:syntax` locally and in CI.
 
 let files = (glob "**/*.nu" --exclude ["**/target/**"])
 mut failures = 0

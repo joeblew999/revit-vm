@@ -1,8 +1,8 @@
 #cloud-config
 # QEMU/TCG variant — runs on hosts WITHOUT /dev/kvm (e.g. Hetzner Cloud,
 # any tier). Forces software emulation via `-e KVM=N`; ~10x slower than
-# KVM-backed but works everywhere. Pair with `mise run up` (default).
-# Use `cloud-init-kvm.yaml` + `mise run up-kvm` on KVM-capable hosts.
+# KVM-backed but works everywhere. Pair with `mise run vm:up` (default).
+# Use `cloud-init-kvm.yaml` + `mise run vm:kvm-up` on KVM-capable hosts.
 package_update: true
 packages:
   - docker.io

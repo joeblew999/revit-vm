@@ -2,7 +2,7 @@
 #
 # Secret VALUES live in macOS keychain (service: "fnox"); this file is just
 # the pointer table mapping env-var names → keychain item names. Safe to
-# commit. Seed values with `mise run set-token` and let `fnox exec -- <cmd>`
+# commit. Seed values with `mise run token:set` (or `vultr:token:set`) and let `fnox exec -- <cmd>`
 # (wrapped by the mise tasks below) inject them as env vars at run time.
 
 [providers.keychain]
