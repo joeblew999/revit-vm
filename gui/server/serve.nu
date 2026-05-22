@@ -76,11 +76,20 @@ def shell [title: string, body: string] {
 
 def vm-row-render [v: record, installs_recent: list] {
     let installs_for_vm = ($installs_recent | where vm_label == $v.label | length)
-    let label = (html-esc ($v.label? | default '-'))
-    let provider = (html-esc ($v.provider? | default '-'))
+    let label_raw = ($v.label? | default '')
+    let prov_raw = ($v.provider? | default '')
+    let label = (html-esc $label_raw)
+    let provider = (html-esc $prov_raw)
     let action = (html-esc ($v.action? | default '-'))
     let ip = (html-esc ($v.ip? | default '-'))
-    $"<tr><td>($label)</td><td>($provider)</td><td>($action)</td><td><code>($ip)</code></td><td>($installs_for_vm)</td></tr>"
+    # Per-row buttons: each button's URL bakes in this row's label + provider
+    # as query params, so the action targets THIS VM (not whatever's in the
+    # form input). Server reads $req.query before signals body.
+    let q = $"?label=($label_raw)&provider=($prov_raw)"
+    let buttons = (if ($label_raw | is-empty) { "" } else {
+        $"<button data-on:click=\"@post\(`/api/vm/stop($q)`\)\" class=\"secondary\">Stop</button> <button data-on:click=\"@post\(`/api/snapshot/create($q)`\)\" class=\"secondary\">Snap</button>"
+    })
+    $"<tr><td>($label)</td><td>($provider)</td><td>($action)</td><td><code>($ip)</code></td><td>($installs_for_vm)</td><td>($buttons)</td></tr>"
 }
 
 # Build a {sku → eur_per_hour} lookup from state/costs.jsonl, so the
@@ -181,7 +190,7 @@ def vms-fragment-render [] {
     $"<figure>
   <table>
     <thead>
-      <tr><th scope=\"col\">label</th><th scope=\"col\">provider</th><th scope=\"col\">last action</th><th scope=\"col\">ip</th><th scope=\"col\">installs</th></tr>
+      <tr><th scope=\"col\">label</th><th scope=\"col\">provider</th><th scope=\"col\">last action</th><th scope=\"col\">ip</th><th scope=\"col\">installs</th><th scope=\"col\">actions</th></tr>
     </thead>
     <tbody>
 ($rows)
@@ -341,7 +350,11 @@ def fire-and-forget [mise_task: string, opts: record = {}] {
     mut args = ["run" $mise_task "--"]
     if ($label | is-not-empty)    { $args = ($args | append ["--label" $label]) }
     if ($provider | is-not-empty) { $args = ($args | append ["--provider" $provider]) }
-    ^pitchfork run $name -f -- mise ...$args
+    # `| complete | ignore` swallows pitchfork's exit code — the daemon
+    # itself may exit non-zero (e.g. when --label foo points at a non-
+    # existent VM), but that's the user's problem to see in pitchfork
+    # logs / the Jobs section, not a gui-handler crash.
+    ^pitchfork run $name -f -- mise ...$args | complete | ignore
     $name
 }
 
@@ -355,7 +368,9 @@ def fire-and-forget [mise_task: string, opts: record = {}] {
 
     # Datastar posts body as {"datastar": {...signals}}; unwrap to a flat
     # record like {label: "...", provider: "..."}. Empty body / no body → {}.
-    let signals = (
+    # Query string takes precedence so per-row table buttons (which bake
+    # label/provider into the URL) override the form-input signals.
+    let body_signals = (
         if (($body | str trim) | is-empty) {
             {}
         } else {
@@ -363,6 +378,8 @@ def fire-and-forget [mise_task: string, opts: record = {}] {
             $parsed.datastar? | default $parsed
         }
     )
+    let query = ($req.query? | default {})
+    let signals = ($body_signals | merge $query)
 
     match [$method, $path] {
         ["GET", "/"]                  => { render-status-board }
