@@ -1,63 +1,113 @@
-# Tool versions are pinned through mise — entering this directory installs
-# them on demand. Same pattern as scrapers-catalogs/domains/trade-fairs.
+# Root mise.toml. Holds:
+#   - workspace tools + env vars
+#   - daily-use orchestrators (start / stop / push / pull)
+#   - provider-aware dispatchers (vm:up / vm:down / vm:ip / snapshot:*)
+#
+# Per-stage task definitions live in their stage folder's mise.toml:
+#   connect/      → rdp:wait, rdp:open, rdp:install
+#   files/        → files:ls
+#   debug/        → debug:ssh, debug:probe, debug:logs, debug:metrics, debug:version, debug:host-disk
+#   software/     → software:fetch, software:fetch-revit, software:list
+#   viewer/       → viewer:open
+#   trial/        → trial:remind
+#   deps/         → deps:check
+#   providers/hetzner/ → token:set, vm:up-qemu, vm:up-kvm
+#   providers/vultr/   → vultr:* (token, setup, enumerate, up/down/status)
+#
+# All subfolder mise.toml files are loaded additively by mise and their
+# tasks are visible from anywhere in the repo. New clones need one-time
+# `mise trust` per file.
+
 [tools]
 hcloud = "1.64.1"
+vultr-cli = "3.10.0"
+# aws-cli — only used for the Cloudflare R2 snapshot-transit pipeline
+# (Phase 3): presigning URLs on the Mac, streaming the qcow2 to R2 on the
+# BM. Unused on Hetzner-only workflows.
+aws = "2.30.4"
 fnox = "1.19.0"
-# Python + uv for linting the IronPython operation scripts
-# (windows-runner/operations/**/*.py). Can't execute them locally —
-# Revit's .NET assemblies are Windows-only — but py_compile + ruff catch
-# typos and obvious bugs before they cost an RDP round-trip.
-python = "3.13"
-uv = "0.11.15"
-# Nushell for task bodies that need to run on both Mac and Windows. Bash
-# is the default on Mac; cmd is the default on Windows; nushell behaves
-# identically on both. Opt in per-task via `shell = "nu --commands"`.
+# Nushell — all task bodies live in .nu files. Cross-platform binary,
+# `git clone && mise install` works on Linux servers the same as on Mac.
+# (Python tools are NOT pinned here anymore; IronPython linting lives in
+# the sibling vm-software repo where windows-runner/ now resides.)
 "aqua:nushell/nushell" = "0.112.2"
+# pitchfork — process manager for the embedded gui (gui:serve:bg keeps
+# http-nu running across shell sessions). Only needed if you use the gui.
+pitchfork = "latest"
 
-# Server provisioning parameters. Tweak here, not in task bodies.
 [env]
+# Which cloud the VM lives in. Default Hetzner (cpx42 TCG, slow but cheap).
+# Override in mise.local.toml to switch:
+#   VM_PROVIDER = "vultr"
+# Accepted: "hetzner" | "vultr".
+VM_PROVIDER = "hetzner"
+
+# Hetzner-side. Used when VM_PROVIDER=hetzner.
 SERVER_NAME = "revit-batch-node"
 SERVER_TYPE = "cpx42"
 SERVER_IMAGE = "ubuntu-24.04"
 SERVER_LOCATION = "fsn1"
-# SSH key already uploaded to the Hetzner project via `hcloud ssh-key create`.
-# Passing it on every `vm:up*` task suppresses the emailed/printed root
-# password and enables `ssh root@<ip>` for in-VM debugging (cloud-init logs,
-# docker logs, etc.).
 SSH_KEY = "gedw99_hetzner"
-# Local SSH private key matching the Hetzner-side public key (SSH_KEY above).
 SSH_KEY_FILE = "~/.ssh/gedw99_hetzner"
-# Set this to the ISO date you started the Autodesk Revit trial — `mise run
-# trial:remind` uses it to print days remaining. Empty = no reminder.
-TRIAL_STARTED = ""
-# Override these in mise.local.toml (gitignored) — see mise.local.toml.example.
-# Empty here so committing the file doesn't ship anyone's per-account URL.
-REVIT_INSTALLER_URL = ""
+
+# (TRIAL_STARTED / REVIT_INSTALLER_URL moved to the sibling vm-software
+# repo along with their consumer tasks — they're per-app concerns, not
+# VM-lifecycle concerns.)
+
+# Vultr-side. Set in mise.local.toml when VM_PROVIDER=vultr. Empty here so
+# this file commits cleanly; tasks error with clear pointers when missing.
+# See `mise run vultr:setup` for the enumeration helpers.
+VULTR_REGION = ""
+VULTR_PLAN = ""
+VULTR_OS_ID = "1743"
+VULTR_SSH_KEY_ID = ""
+VULTR_LABEL = "revit-batch-node"
+
+# Cloudflare R2 — snapshot transit bucket (Phase 3). Provider-neutral;
+# both Vultr's `snapshot create-url` and a future Hetzner cross-provider
+# import path pull from here. Bootstrap once via `mise run r2:bootstrap`.
+R2_ENDPOINT = ""
+R2_BUCKET = ""
+
+# Embedded gui (gui/*). Set in mise.local.toml to point at a sibling
+# vm-software clone (for installs.jsonl) and pick a listen address.
+VM_SOFTWARE_REPO = ""
+HTTP_NU_ADDR = "127.0.0.1:8080"
+REFRESH_INTERVAL_SEC = "10"
 
 # ╔═════════════════════════════════════════════════════════════════════════╗
 # ║ DAILY USE — these four cover 99% of work. Everything below is granular. ║
 # ╚═════════════════════════════════════════════════════════════════════════╝
 
 [tasks.start]
-description = "RESUME WORK. Provisions a VM (from latest snapshot if one exists, else fresh), waits for Windows to be RDP-ready, opens the RDP client. ~90s from a hot snapshot, ~1hr from scratch."
+description = "RESUME WORK. Provisions a VM (from latest snapshot if any, else fresh), waits for Windows to be RDP-ready, opens RDP. Hetzner: ~90s from snapshot, ~1hr fresh. Vultr: ~6 min fresh on KVM (snapshot path lights up after Phase 3 R2 bootstrap)."
 run = '''
 set -e
-if fnox exec -- hcloud image list --type snapshot -o json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-  echo "→ booting from latest snapshot"
-  mise run vm:up-snap
-else
-  echo "→ no snapshot — fresh provision (will take ~1hr for Windows install)"
-  mise run vm:up
-fi
+case "$VM_PROVIDER" in
+  hetzner)
+    if fnox exec --if-missing ignore -- hcloud image list --type snapshot -o json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+      echo "→ booting from latest Hetzner snapshot"
+      mise run vm:up-snap
+    else
+      echo "→ no snapshot — fresh Hetzner provision (~1hr for Windows install on TCG)"
+      mise run vm:up
+    fi
+    ;;
+  vultr)
+    echo "→ fresh Vultr Bare Metal provision (~6 min Windows install on KVM)"
+    mise run vm:up
+    ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
 mise run rdp:wait
 mise run rdp:open
 '''
 
 [tasks.stop]
-description = "END WORK. Clean-shuts Windows first (ACPI via `docker stop --timeout=120`), then snapshots, prunes older snapshots, destroys VM. Guaranteed ~3 min total — without the clean-shutdown the snapshot can hang for tens of minutes on hot dirty pages. Cost meter off; next `mise run start` restores everything in ~90s. ABORTS if any step fails — your work is never destroyed without first being saved."
+description = "END WORK. Clean-shuts Windows (ACPI via `docker stop --timeout=120`), snapshots (Hetzner: native ~60s; Vultr: dd → R2 → snapshot create-url, ~30-60 min), prunes older snapshots, destroys VM. ABORTS if any step fails — state is never destroyed without first being saved."
 run = '''
 set -e
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
+IP=$(mise run vm:ip)
 KEY="${SSH_KEY_FILE/#~/$HOME}"
 echo "→ clean-shutting Windows (ACPI via docker stop, up to 120s)"
 ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
@@ -68,411 +118,252 @@ mise run vm:down
 '''
 
 [tasks.push]
-description = "Send a local file/dir TO the VM. Usage: `mise run push -- <path>`. Appears inside Windows as \\\\host.lan\\Data\\<basename>."
-run = '''
-push() {
-  [ -z "$1" ] && { echo "usage: mise run push -- <local-path>"; exit 1; }
-  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "$1" "root@$IP:/root/windows_shared/"
-  echo "pushed → \\\\host.lan\\Data\\$(basename "$1")"
-}
-push "$@"
-'''
+description = "Send a local file/dir TO the VM. Usage: `mise run push -- <path>`. Appears in Windows at \\\\host.lan\\Data\\<basename>."
+run = "nu files/push.nu"
 
 [tasks.pull]
-description = "Get a file/dir FROM the VM. Usage: `mise run pull -- <name>` where <name> is what's at /root/windows_shared/<name> (the same path Windows sees as \\\\host.lan\\Data\\<name>). File lands in the current dir."
-run = '''
-pull() {
-  [ -z "$1" ] && { echo "usage: mise run pull -- <remote-name>"; exit 1; }
-  IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-  scp -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new -r "root@$IP:/root/windows_shared/$1" .
-  echo "pulled ← ./$1"
-}
-pull "$@"
-'''
+description = "Get a file/dir FROM the VM. Usage: `mise run pull -- <name>` (relative to /root/windows_shared on the VM, same as \\\\host.lan\\Data\\<name>)."
+run = "nu files/pull.nu"
 
-# ── deps ──────────────────────────────────────────────────────────────────
+# ── state ─────────────────────────────────────────────────────────────────
+[tasks."state:show"]
+description = "Show vm lifecycle events from state/vms.jsonl (provisioned / destroyed / snapshotted). The embedded gui (gui:* tasks) joins this with vm-software's installs.jsonl."
+run = "nu state/show.nu"
+
+# ── gui (embedded web control plane, gui/*) ───────────────────────────────
+# Read-only status board. Requires http-nu installed separately:
+#   cargo install --git https://github.com/cablehead/http-nu
+# Requires VM_SOFTWARE_REPO in mise.local.toml pointing at a sibling clone.
+
+[tasks."gui:serve"]
+description = "Start the gui web server on $HTTP_NU_ADDR. Serves state/vms.jsonl (local) + $VM_SOFTWARE_REPO/state/installs.jsonl as a unified status board."
+run = "http-nu $env.HTTP_NU_ADDR gui/server/serve.nu"
+
+[tasks."gui:serve:bg"]
+description = "Same as `gui:serve` but under pitchfork so it survives this shell. Use for the deployed instance."
+run = "pitchfork run vm-servers-gui -- http-nu $env.HTTP_NU_ADDR gui/server/serve.nu"
+
+[tasks."gui:state:aggregate"]
+description = "Print the joined VMs + installs state as a table (CLI version of the gui's status board)."
+run = "nu gui/state/aggregate.nu"
+
+[tasks."gui:state:refresh"]
+description = "git pull on the sibling vm-software repo. vm-servers's own state/vms.jsonl is local — no pull needed."
+run = "nu gui/state/refresh.nu"
+
+# ── deps + token ──────────────────────────────────────────────────────────
 [tasks."deps:check"]
-description = "Verify hcloud + fnox are present and HCLOUD_TOKEN is seeded in macOS keychain."
-run = '''
-command -v hcloud >/dev/null || { echo "hcloud missing — run: mise install"; exit 1; }
-command -v fnox   >/dev/null || { echo "fnox missing — run: mise install"; exit 1; }
-fnox get HCLOUD_TOKEN >/dev/null 2>&1 \
-  && echo "ok: hcloud $(hcloud version | awk '/^hcloud/ {print $2}'), HCLOUD_TOKEN present" \
-  || { echo "HCLOUD_TOKEN missing — run: mise run token:set"; exit 1; }
-'''
+description = "Verify required CLIs are present and the active provider's API token is seeded in keychain. Dispatches on $VM_PROVIDER."
+run = "nu deps/check.nu"
 
-# ── token ─────────────────────────────────────────────────────────────────
 [tasks."token:set"]
-description = "One-time: stash a Hetzner Cloud API token in macOS keychain via fnox. Prompts for hidden input. Token must have Read & Write on the target project (https://console.hetzner.cloud → project → Security → API tokens)."
-run = "fnox set -p keychain HCLOUD_TOKEN"
+description = "One-time: stash a Hetzner Cloud API token in macOS keychain via fnox. Generate at https://console.hetzner.cloud → project → Security → API tokens. For Vultr, use `mise run vultr:token:set`."
+run = "nu providers/hetzner/token-set.nu"
 
-# ── vm ────────────────────────────────────────────────────────────────────
-[tasks."vm:up"]
-description = "Provision the VM with the QEMU/TCG cloud-init (Hetzner-Cloud-safe, ~10x slower). Default — alias for `vm:up-qemu`."
-depends = ["vm:up-qemu"]
+# ── vm (provider-aware front doors) ───────────────────────────────────────
+# Hetzner-specific implementations (vm:up-qemu, vm:up-kvm) are defined
+# below. Vultr-specific tasks live under vultr:*. The vm:* switches route
+# by $VM_PROVIDER into providers/{hetzner,vultr}/*.nu.
 
 [tasks."vm:up-qemu"]
-description = "Provision with cloud-init-qemu.yaml: forces dockur into TCG software emulation (`-e KVM=N`). Required on Hetzner Cloud (no nested virt on any tier). Works everywhere; slow."
-run = '''
-fnox exec -- hcloud server create \
-  --name "$SERVER_NAME" \
-  --type "$SERVER_TYPE" \
-  --image "$SERVER_IMAGE" \
-  --location "$SERVER_LOCATION" \
-  --ssh-key "$SSH_KEY" \
-  --user-data-from-file cloud-init-qemu.yaml
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME" 2>/dev/null) && \
-  ssh-keygen -R "$IP" >/dev/null 2>&1 || true
-'''
+description = "[Hetzner] Provision with cloud-init-qemu.yaml (TCG / `KVM=N`). Required on Hetzner Cloud — no nested virt on any tier."
+run = "nu providers/hetzner/up.nu"
 
 [tasks."vm:up-kvm"]
-description = "Provision with cloud-init-kvm.yaml: passes --device=/dev/kvm to dockur for native-speed Windows. ONLY for hosts that expose /dev/kvm — Hetzner Dedicated Root Server, other clouds' bare-metal SKUs, local Linux KVM box. Will fail on Hetzner Cloud."
+description = "[Hetzner Dedicated only] Provision with cloud-init-kvm.yaml (passes --device=/dev/kvm). Fails on Hetzner Cloud. For Vultr Bare Metal use `mise run vm:up` with VM_PROVIDER=vultr."
+run = "nu providers/hetzner/up-kvm.nu"
+
+[tasks."vm:up"]
+description = "Provision a fresh VM with the active provider. Hetzner → cloud-init-qemu.yaml (TCG). Vultr Bare Metal → cloud-init-kvm.yaml (KVM)."
 run = '''
-fnox exec -- hcloud server create \
-  --name "$SERVER_NAME" \
-  --type "$SERVER_TYPE" \
-  --image "$SERVER_IMAGE" \
-  --location "$SERVER_LOCATION" \
-  --ssh-key "$SSH_KEY" \
-  --user-data-from-file cloud-init-kvm.yaml
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME" 2>/dev/null) && \
-  ssh-keygen -R "$IP" >/dev/null 2>&1 || true
+case "$VM_PROVIDER" in
+  hetzner) mise run vm:up-qemu ;;
+  vultr)   mise run vultr:up ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
 '''
 
 [tasks."vm:up-snap"]
-description = "Provision a new VM from the latest snapshot — Windows pre-installed, no cloud-init re-run, dockur container auto-restarts. Errors clearly if no snapshot exists."
+description = "Provision from latest snapshot. Hetzner: native hcloud snapshot. Vultr: `bare-metal create --snapshot <id>` (Phase 3, requires R2-backed snapshot to exist)."
 run = '''
-SNAP_ID=$(fnox exec -- hcloud image list --type snapshot -o json | jq -r 'sort_by(.created) | .[-1].id // empty')
-if [ -z "$SNAP_ID" ]; then
-  echo "No snapshots found — run \`mise run snapshot:create\` first (against a running VM)"
-  exit 1
-fi
-echo "provisioning $SERVER_NAME from snapshot $SNAP_ID"
-fnox exec -- hcloud server create \
-  --name "$SERVER_NAME" \
-  --type "$SERVER_TYPE" \
-  --image "$SNAP_ID" \
-  --location "$SERVER_LOCATION" \
-  --ssh-key "$SSH_KEY"
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME" 2>/dev/null) && \
-  ssh-keygen -R "$IP" >/dev/null 2>&1 || true
+case "$VM_PROVIDER" in
+  hetzner) nu providers/hetzner/up-snap.nu ;;
+  vultr)   nu providers/vultr/up-snap.nu ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
 '''
 
 [tasks."vm:down"]
-description = "Delete the VM. Storage volumes (if any are attached separately) survive — this only removes the compute instance. To preserve the Windows install across down/up cycles, run `mise run snapshot:create` BEFORE this, then `vm:up-snap` later."
-run = 'fnox exec -- hcloud server delete "$SERVER_NAME"'
+description = "Delete the VM. Both providers: snapshot first (via the `stop` task) to preserve state."
+run = '''
+case "$VM_PROVIDER" in
+  hetzner) nu providers/hetzner/down.nu ;;
+  vultr)   nu providers/vultr/down.nu ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
+'''
 
 [tasks."vm:status"]
-description = "Describe the VM — IP, state, created-at. Returns non-zero if the server doesn't exist."
-run = 'fnox exec -- hcloud server describe "$SERVER_NAME"'
+description = "Describe the VM — IP, state, created-at. Non-zero exit if the VM doesn't exist."
+run = '''
+case "$VM_PROVIDER" in
+  hetzner) nu providers/hetzner/status.nu ;;
+  vultr)   nu providers/vultr/status.nu ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
+'''
 
 [tasks."vm:ip"]
-description = "Print the VM's public IPv4."
-run = '''fnox exec -- hcloud server ip "$SERVER_NAME"'''
-
-# ── snapshot ──────────────────────────────────────────────────────────────
-[tasks."snapshot:create"]
-description = "Snapshot the running VM so Windows survives a `vm:down`/`vm:up` cycle. Hot snapshot (VM stays running) — Hetzner does a crash-consistent capture; for cleanest results shut Windows down via RDP first. Storage cost: ~€0.012/GB/mo while the snapshot exists (~€0.40-0.80/mo typical for revit-vm)."
+description = "Print the VM's public IPv4. Dispatches on $VM_PROVIDER."
 run = '''
-TS=$(date -u +%Y%m%d-%H%M%S)
-DESC="$SERVER_NAME-$TS"
-echo "creating snapshot: $DESC"
-fnox exec -- hcloud server create-image \
-  --type snapshot \
-  --description "$DESC" \
-  "$SERVER_NAME"
+case "$VM_PROVIDER" in
+  hetzner) nu providers/hetzner/ip.nu ;;
+  vultr)   nu providers/vultr/ip.nu ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
+'''
+
+# ── r2 (Cloudflare R2 — snapshot transit bucket) ──────────────────────────
+[tasks."r2:bootstrap"]
+description = "Guided walkthrough to set up the CF R2 bucket + API token used by the snapshot pipeline (Vultr today, future cross-provider). One-time per account. Prints the values to paste into mise.local.toml + the fnox set commands."
+run = "nu r2/bootstrap.nu"
+
+[tasks."r2:check"]
+description = "Probe PUT/GET/DELETE round-trip against the configured R2 bucket. Use after `r2:bootstrap` to confirm credentials work before running snapshot pipelines."
+run = "nu r2/check.nu"
+
+# ── vultr (provider-specific paths) ───────────────────────────────────────
+[tasks."vultr:token:set"]
+description = "One-time: stash a Vultr API key in macOS keychain via fnox. Generate at https://my.vultr.com → Account → API. Needs Read/Write; subnet-restrict to your home IP."
+run = "nu providers/vultr/token-set.nu"
+
+[tasks."vultr:up"]
+description = "[Vultr] Provision a Bare Metal instance with cloud-init-kvm.yaml. Requires VULTR_REGION/PLAN/OS_ID/SSH_KEY_ID in mise.local.toml."
+run = "nu providers/vultr/up.nu"
+
+[tasks."vultr:down"]
+description = "[Vultr] Destroy the BM matching VULTR_LABEL."
+run = "nu providers/vultr/down.nu"
+
+[tasks."vultr:status"]
+description = "[Vultr] Describe the BM matching VULTR_LABEL."
+run = "nu providers/vultr/status.nu"
+
+[tasks."vultr:setup"]
+description = "[Vultr] First-time setup wizard. Prints current VULTR_* selections and enumerates regions, BM plans (≥6c), SSH keys, and Ubuntu OS IDs. Run before your first `mise run start` with VM_PROVIDER=vultr."
+run = "nu providers/vultr/setup.nu"
+
+[tasks."vultr:enumerate:regions"]
+description = "[Vultr] List all Vultr regions. Use the ID for VULTR_REGION in mise.local.toml."
+run = "nu providers/vultr/enumerate-regions.nu"
+
+[tasks."vultr:enumerate:plans"]
+description = "[Vultr] List Bare Metal plans with ≥6 cores (what dockur needs). Use the ID for VULTR_PLAN."
+run = "nu providers/vultr/enumerate-plans.nu"
+
+[tasks."vultr:enumerate:ssh"]
+description = "[Vultr] List SSH keys uploaded to your Vultr account. Use the UUID for VULTR_SSH_KEY_ID."
+run = "nu providers/vultr/enumerate-ssh.nu"
+
+[tasks."vultr:enumerate:os"]
+description = "[Vultr] List Ubuntu OS IDs available for fresh BM installs. Default 1743 = Ubuntu 24.04 x64."
+run = "nu providers/vultr/enumerate-os.nu"
+
+# ── snapshot (provider-aware) ─────────────────────────────────────────────
+[tasks."snapshot:create"]
+description = "Snapshot the running VM. Hetzner: hot hcloud snapshot (caller clean-shuts Windows first). Vultr: dd|gzip|R2 upload → `vultr-cli snapshot create-url` → registers in Vultr's snapshot store (Phase 3)."
+run = '''
+case "$VM_PROVIDER" in
+  hetzner) nu providers/hetzner/snapshot-create.nu ;;
+  vultr)   nu providers/vultr/snapshot-create.nu ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
 '''
 
 [tasks."snapshot:list"]
-description = "List snapshots in this Hetzner project (newest last). Use `mise run snapshot:prune` to delete all but the latest if costs accumulate."
-run = "fnox exec -- hcloud image list --type snapshot -o columns=id,description,image_size,created"
+description = "List snapshots in the active provider's store."
+run = '''
+case "$VM_PROVIDER" in
+  hetzner) nu providers/hetzner/snapshot-list.nu ;;
+  vultr)   nu providers/vultr/snapshot-list.nu ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
+'''
 
 [tasks."snapshot:prune"]
 description = """
-Delete old snapshots, keep the N newest. Useful because `mise run stop` makes a fresh snapshot every time — without pruning, snapshots accumulate forever at ~€0.48/mo each.
+Delete old snapshots, keep the N newest (default 1 — set via SNAPSHOTS_KEEP).
 
-How many to keep is set by the SNAPSHOTS_KEEP env var (default 1):
-  mise run snapshot:prune                    → keeps newest 1   (~€0.48/mo)  — current behavior
-  SNAPSHOTS_KEEP=3 mise run snapshot:prune   → keeps newest 3   (~€1.44/mo)  — gives you rollback if today's snapshot is broken
-
-When would N>1 matter? If a Windows update corrupts something inside the VM, your most recent snapshot is corrupt too. With N=1 you've nuked yesterday's good copy. With N=3 you've got two older known-good fallbacks. Cost is linear in N.
-
-Safe to run any time — never deletes more than (total - N), never deletes the newest.
+  mise run snapshot:prune                    → keeps newest 1
+  SNAPSHOTS_KEEP=3 mise run snapshot:prune   → keeps newest 3
 """
 run = '''
-N="${SNAPSHOTS_KEEP:-1}"
-TOTAL=$(fnox exec -- hcloud image list --type snapshot -o json | jq 'length')
-echo "snapshots in project: $TOTAL, retention target: $N"
-if [ "$TOTAL" -le "$N" ]; then
-  echo "  nothing to do — under the retention limit"
-  exit 0
-fi
-echo "keeping newest $N:"
-fnox exec -- hcloud image list --type snapshot -o json \
-  | jq -r --argjson n "$N" 'sort_by(.created) | .[-$n:] | .[] | "  \(.id)  \(.description)"'
-echo "deleting older $((TOTAL - N)):"
-fnox exec -- hcloud image list --type snapshot -o json \
-  | jq -r --argjson n "$N" 'sort_by(.created) | .[0:-$n] | .[].id' \
-  | while read ID; do
-      echo "  delete $ID"
-      fnox exec -- hcloud image delete "$ID"
-    done
+case "$VM_PROVIDER" in
+  hetzner) nu providers/hetzner/snapshot-prune.nu ;;
+  vultr)   nu providers/vultr/snapshot-prune.nu ;;
+  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
+esac
 '''
 
 # ── rdp ───────────────────────────────────────────────────────────────────
 [tasks."rdp:wait"]
-description = "Block until port 3389 accepts TCP connections — the signal that Windows has fully booted past OOBE and the RDP service is up. Polls every 30s, times out at 90 min. Pops a macOS notification when ready so you can walk away. Chain it: `mise run rdp:wait && mise run rdp:open`."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-START=$(date +%s)
-MAX=$((90 * 60))
-echo "polling $IP:3389 (every 30s, max 90 min)..."
-while true; do
-  ELAPSED=$(( $(date +%s) - START ))
-  if [ "$ELAPSED" -gt "$MAX" ]; then
-    echo "[t+${ELAPSED}s] timed out — investigate via mise run viewer:open"
-    osascript -e 'display notification "RDP wait timed out after 90 min" with title "revit-vm" sound name "Basso"' 2>/dev/null
-    exit 1
-  fi
-  if nc -z -w 3 "$IP" 3389 2>/dev/null; then
-    echo "[t+${ELAPSED}s] 3389 accepting — Windows is RDP-ready"
-    osascript -e 'display notification "Windows is RDP-ready — run mise run rdp:open" with title "revit-vm" sound name "Glass"' 2>/dev/null
-    exit 0
-  fi
-  printf "[t+%ds] not yet\\r" "$ELAPSED"
-  sleep 30
-done
-'''
+description = "Block until port 3389 accepts TCP — Windows finished OOBE. Polls every 30s, 90 min max. macOS notification on success/timeout."
+run = "nu connect/rdp-wait.nu"
 
 [tasks."rdp:install"]
-description = "Install Microsoft's macOS RDP client ('Windows App') via Homebrew cask. One-time per machine. The cask runs a .pkg installer that needs sudo; a native macOS password dialog will pop (no terminal prompt). Idempotent — re-runs are no-ops once installed."
-run = '''
-if ls -d "/Applications/Windows App.app" >/dev/null 2>&1; then
-  echo "Windows App already installed."
-  exit 0
-fi
-ASKPASS=$(mktemp /tmp/askpass.XXXXXX)
-cat > "$ASKPASS" <<'EOF'
-#!/bin/bash
-osascript -e 'tell application "System Events" to display dialog "macOS sudo password (for installing Windows App):" default answer "" with hidden answer with title "mise rdp:install"' -e 'text returned of result' 2>/dev/null
-EOF
-chmod +x "$ASKPASS"
-SUDO_ASKPASS="$ASKPASS" brew install --cask windows-app
-RC=$?
-rm -f "$ASKPASS"
-exit $RC
-'''
+description = "Install Microsoft's macOS RDP client (`Windows App`) via Homebrew cask. One-time per machine. Idempotent."
+run = "nu connect/rdp-install.nu"
 
 [tasks."rdp:open"]
-description = "Open RDP to the VM. Auto-installs the Windows App client on first run (pops macOS password dialog). dockur default credentials: user `Docker`, password empty. RDP will refuse the connection until Windows finishes installing — watch progress in `mise run viewer:open` first."
+description = "Open RDP to the VM. Auto-installs the client on first run. dockur defaults: user `Docker`, password `admin`."
 depends = ["rdp:install"]
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-RDP=/tmp/revit-batch-node.rdp
-cat > "$RDP" <<EOF
-full address:s:$IP:3389
-username:s:Docker
-prompt for credentials:i:0
-screen mode id:i:1
-desktopwidth:i:1600
-desktopheight:i:1000
-session bpp:i:32
-audiomode:i:0
-EOF
-echo "wrote $RDP — host $IP:3389, user Docker, password empty (just press enter)"
-echo "probing port 3389..."
-nc -z -w 3 "$IP" 3389 \
-  && echo "3389 reachable — opening" \
-  || echo "3389 not listening yet (Windows still installing?) — opening anyway"
-open "$RDP"
-'''
+run = "nu connect/rdp-open.nu"
 
-# ── files (shared-folder listing — push/pull are at the top) ──────────────
-# Files placed in /root/windows_shared on the VM appear inside Windows as
-# \\host.lan\Data. The `push` and `pull` top-level tasks handle the
-# Mac↔VM transfer.
+# ── files (push/pull are at the top) ──────────────────────────────────────
 [tasks."files:ls"]
-description = "List what's in the VM's shared folder right now. Same view Windows sees at \\\\host.lan\\Data."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" "find /root/windows_shared -mindepth 1 -maxdepth 2 -printf '%p (%s bytes)\n' 2>/dev/null"
-'''
-
-# ── software ──────────────────────────────────────────────────────────────
-[tasks."software:fetch"]
-description = "Read installers.txt and download every PUBLIC Windows installer listed into /root/windows_shared/installers/ on the VM. Idempotent — already-present files are skipped. Per-account-auth'd installers (Revit, AutoCAD, …) stay out of this list; push those via `mise run push -- <path>`."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-KEY="${SSH_KEY_FILE/#~/$HOME}"
-ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "mkdir -p /root/windows_shared/installers"
-grep -v "^#" installers.txt | grep -v "^[[:space:]]*$" | while read NAME URL REST; do
-  echo "fetching $NAME"
-  ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
-    "[ -f /root/windows_shared/installers/$NAME ] && echo '  already present' || curl -sSL --fail -o /root/windows_shared/installers/$NAME '$URL'"
-done
-ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "ls -lh /root/windows_shared/installers/"
-'''
-
-[tasks."software:fetch-revit"]
-description = "Download YOUR Revit installer (account-tied, time-limited URL from manage.autodesk.com) directly onto the VM, and copy the silent-install batch alongside it. Reads REVIT_INSTALLER_URL from mise.local.toml — errors clearly if empty. Cheaper than push-from-Mac (VM-side download = Hetzner DC bandwidth, not your home upload). After this: RDP in, run `\\\\host.lan\\Data\\install-revit.bat`, sign in to the trial inside Revit, snapshot."
-run = '''
-if [ -z "$REVIT_INSTALLER_URL" ]; then
-  echo "REVIT_INSTALLER_URL not set."
-  echo "  1. Copy mise.local.toml.example to mise.local.toml"
-  echo "  2. Paste your Autodesk download URL (manage.autodesk.com → Revit → Download)"
-  echo "  3. Re-run this task"
-  exit 1
-fi
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-KEY="${SSH_KEY_FILE/#~/$HOME}"
-echo "downloading Revit installer to the VM (this is the big one — many GB)..."
-ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "mkdir -p /root/windows_shared/installers && \
-   [ -f /root/windows_shared/installers/Revit_Installer.exe ] \
-     && echo 'already present — delete it on the VM to force re-download' \
-     || curl -L --fail --progress-bar -o /root/windows_shared/installers/Revit_Installer.exe '$REVIT_INSTALLER_URL'"
-echo "uploading install-revit.bat..."
-scp -i "$KEY" -o StrictHostKeyChecking=accept-new \
-  windows-scripts/install-revit.bat "root@$IP:/root/windows_shared/install-revit.bat"
-echo
-echo "Done. Inside Windows (RDP in via \`mise run rdp:open\`), run:"
-echo "  \\\\host.lan\\Data\\install-revit.bat"
-'''
-
-[tasks."software:list"]
-description = "List installers declared in installers.txt + what's already staged on the VM."
-run = '''
-echo "=== installers.txt (declared) ==="
-grep -v "^#" installers.txt | grep -v "^[[:space:]]*$" | awk '{print $1}'
-echo "=== /root/windows_shared/installers/ on the VM (staged) ==="
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "ls -lh /root/windows_shared/installers/ 2>/dev/null || echo '(none — vm may pre-date the shared-folder cloud-init, or run mise run software:fetch)'"
-'''
-
-# ── trial ─────────────────────────────────────────────────────────────────
-[tasks."trial:remind"]
-description = "Print how many days are left on your Autodesk Revit trial — based on the TRIAL_STARTED env var (ISO date) at the top of mise.toml. Autodesk doesn't expose a public 'days remaining' API, so this is local math, not a server check. Set TRIAL_STARTED to the day you signed in to the trial."
-run = '''
-[ -z "$TRIAL_STARTED" ] && { echo "TRIAL_STARTED not set in mise.toml [env]"; exit 1; }
-EXPIRES=$(date -u -j -v+30d -f "%Y-%m-%d" "$TRIAL_STARTED" +"%Y-%m-%d" 2>/dev/null) || \
-EXPIRES=$(date -u -d "$TRIAL_STARTED + 30 days" +"%Y-%m-%d")
-TODAY=$(date -u +%Y-%m-%d)
-DAYS_LEFT=$(( ( $(date -j -f "%Y-%m-%d" "$EXPIRES" +%s 2>/dev/null || date -d "$EXPIRES" +%s) - $(date +%s) ) / 86400 ))
-echo "trial started:  $TRIAL_STARTED"
-echo "trial expires:  $EXPIRES"
-echo "days remaining: $DAYS_LEFT"
-[ "$DAYS_LEFT" -lt 7 ] && echo "⚠  fewer than 7 days left — convert to paid or finish evaluation"
-'''
-
-# ── debug ─────────────────────────────────────────────────────────────────
-# Not part of daily workflow. Reach for these when something seems broken
-# (Windows hangs, ports closed, container restart-looping, etc.).
-
-[tasks."debug:ssh"]
-description = "Open an interactive SSH shell on the host Linux VM as root. Use for poking at docker, /root/windows_storage, /root/windows_shared, cloud-init logs, etc. `exit` to leave."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP"
-'''
-
-[tasks."debug:probe"]
-description = "Quick health check: container state, both mounts, restart policy, ports 22/3389/8006 reachability. Run this first when something seems off."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-KEY="${SSH_KEY_FILE/#~/$HOME}"
-echo "=== VM: $IP ==="
-echo "--- container ---"
-ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" 'bash -s' <<'REMOTE'
-docker ps -a
-echo "restart policy: $(docker inspect windows_batch_processor --format {% raw %}'{{.HostConfig.RestartPolicy.Name}}'{% endraw %})"
-echo "mounts:"
-docker inspect windows_batch_processor --format {% raw %}'{{range .Mounts}}  {{.Source}} -> {{.Destination}}
-{{end}}'{% endraw %}
-REMOTE
-echo "--- external port probes ---"
-nc -z -w 3 "$IP" 22   && echo "22   (SSH):    open" || echo "22   (SSH):    CLOSED"
-nc -z -w 3 "$IP" 8006 && echo "8006 (viewer): open" || echo "8006 (viewer): CLOSED"
-nc -z -w 3 "$IP" 3389 && echo "3389 (RDP):    open" || echo "3389 (RDP):    CLOSED"
-'''
-
-[tasks."debug:logs"]
-description = "Tail the dockur container's stdout (Windows boot/install progress). Add ARG=-f to follow live. Useful when Windows seems stuck mid-boot."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "docker logs --tail 40 windows_batch_processor 2>&1"
-'''
-
-[tasks."debug:metrics"]
-description = "Print Hetzner-side metrics for the last 5 min: peak network in/out, CPU avg/peak. Confirms VM is doing real work (vs. wedged) without needing SSH."
-run = '''
-START=$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "5 minutes ago" +%Y-%m-%dT%H:%M:%SZ)
-END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "=== network (bytes/s) ==="
-fnox exec -- hcloud server metrics "$SERVER_NAME" --type network --start "$START" --end "$END" -o json 2>&1 \
-  | jq -r '.metrics.time_series | to_entries[] | "  \(.key): peak=\(.value.values | map(.[1] | tonumber) | max | floor)"'
-echo "=== CPU (%) ==="
-fnox exec -- hcloud server metrics "$SERVER_NAME" --type cpu --start "$START" --end "$END" -o json 2>&1 \
-  | jq -r '.metrics.time_series | to_entries[] | "  \(.key): avg=\(.value.values | map(.[1] | tonumber) | (add/length) | floor)%, peak=\(.value.values | map(.[1] | tonumber) | max | floor)%"'
-'''
-
-[tasks."debug:version"]
-description = "Show dockur/windows version status — what's running on the live VM, what's pinned in the cloud-init files, and what's the latest released on GitHub. Lets you decide if it's time to bump."
-run = '''
-echo "=== pinned in cloud-init ==="
-grep -h "dockurr/windows" cloud-init-*.yaml | sed "s|^[[:space:]]*|  |"
-echo "=== running on live VM ==="
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME" 2>/dev/null) || { echo "  no VM up"; exit 0; }
-ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  'docker logs windows_batch_processor 2>&1 | grep -oE "Windows for Docker v[0-9.]+" | head -1 | sed "s|^|  |"'
-echo "=== latest available on GitHub ==="
-gh release list --repo dockur/windows --limit 3 2>/dev/null | head -3 | sed "s|^|  |"
-'''
-
-[tasks."python:check"]
-description = "Syntax-check every IronPython operation script via `python -m py_compile`. Catches typos before they cost an RDP round-trip. Doesn't execute (Revit-specific imports are unresolvable here). Fast — <1s. Runs on Mac or Windows."
-shell = "nu --commands"
-run = '''
-let files = (glob windows-runner/**/*.py)
-if ($files | is-empty) {
-  print "no .py files under windows-runner/"
-  exit 0
-}
-python -m py_compile ...$files
-print $"syntax ok: ($files | length) files"
-'''
-
-[tasks."python:lint"]
-description = "Lint every IronPython operation script via `uvx ruff check`. Style + dead code + obvious bugs. Configured in pyproject.toml to ignore Revit-specific import patterns. Fast — <2s. Runs on Mac or Windows."
-run = "uvx ruff check windows-runner tests"
-
-[tasks."python:test"]
-description = "Run every operation script locally with mocked Revit modules (tests/revit_mocks.py). Won't catch Revit API behaviour mistakes, but DOES catch typos / wrong attribute names / missing imports / wrong arg counts. Pass here means the script structure is sound; real validation still needs RDP. Runs on Mac or Windows."
-run = "python tests/run.py"
-
-[tasks."debug:host-disk"]
-description = "Disk usage on the host VM — sees both the Windows qcow2 (in /root/windows_storage) and the shared folder. Catches 'snapshot will be bigger than expected' early."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-ssh -i "${SSH_KEY_FILE/#~/$HOME}" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "df -h /; echo; du -sh /root/windows_storage /root/windows_shared 2>/dev/null"
-'''
+description = "List the VM's shared folder. Same view Windows sees at \\\\host.lan\\Data."
+run = "nu files/ls.nu"
 
 # ── viewer ────────────────────────────────────────────────────────────────
+# (software:* and trial:* moved to the sibling vm-software repo. To install
+# things on a running VM: ssh in, `git clone https://github.com/joeblew999/
+# vm-software && cd vm-software && mise install && mise run install:<app>`.)
+
 [tasks."viewer:open"]
-description = "Open dockur's web viewer (port 8006) in the default browser. Works the moment dockur is up — shows Windows install progress, then Windows itself."
-run = '''
-IP=$(fnox exec -- hcloud server ip "$SERVER_NAME")
-echo "opening http://$IP:8006/"
-open "http://$IP:8006/"
-'''
+description = "Open dockur's web viewer (port 8006) in the default browser. Works as soon as dockur is up."
+run = "nu viewer/open.nu"
+
+# ── debug ─────────────────────────────────────────────────────────────────
+[tasks."debug:ssh"]
+description = "Interactive SSH on the host Linux VM as root."
+run = "nu debug/ssh.nu"
+
+[tasks."debug:probe"]
+description = "Quick health check: container state, mounts, restart policy, ports 22/3389/8006. Run first when something seems off."
+run = "nu debug/probe.nu"
+
+[tasks."debug:logs"]
+description = "Tail the dockur container's stdout. Useful when Windows seems stuck mid-boot."
+run = "nu debug/logs.nu"
+
+[tasks."debug:metrics"]
+description = "[Hetzner only] Print last-5-min Hetzner-side metrics: peak network, CPU avg/peak."
+run = "nu debug/metrics.nu"
+
+[tasks."debug:version"]
+description = "Show dockur/windows version: pinned in cloud-init, running on live VM, latest released on GitHub."
+run = "nu debug/version.nu"
+
+[tasks."debug:host-disk"]
+description = "Disk usage on the host VM — sees Windows qcow2 and shared folder."
+run = "nu debug/host-disk.nu"
+
+# ── Windows-side setup helper ─────────────────────────────────────────────
+# (python:* lint/test tasks moved to the sibling vm-software repo with the
+# windows-runner/ IronPython operations.)
 
 [tasks.win-setup-ssh]
-description = "Run this task ON THE WINDOWS MACHINE (as Admin) to automatically configure OpenSSH and print your Mac setup commands."
+description = "Run this task ON THE WINDOWS MACHINE (as Admin) to configure OpenSSH and print Mac setup commands."
 shell = "powershell -Command"
 run = '''
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -510,4 +401,3 @@ Write-Host "export LAN_WINDOWS_USER=\"$user\""
 Write-Host "export LAN_SSH_PASS=\"(Your Windows Account Password)\""
 Write-Host "=================================================="
 '''
-

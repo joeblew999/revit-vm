@@ -1,4 +1,4 @@
-# From revit-vm to a generic Windows-as-a-service
+# From vm-servers to a generic Windows-as-a-service
 
 Forward-looking architecture sketch. Not built yet. Captures the design so the next agent (or you in 6 months) doesn't re-derive it.
 
@@ -158,12 +158,17 @@ The Rust code IS the source of truth for what happened inside Windows. With thes
 
 ## Where this lives
 
-**In this repo, not a separate one.** The service code, orchestrator, Worker, schema, and mise tasks for both "personal use" (today) and "service mode" (future) all live in `revit-vm`. One mental model, one deploy story, one place to look. The repo's name predates the realisation that the shape is generic; the name stays for now since Revit is the headline app.
+**Split across two sibling repos + an embedded gui (renamed 2026-05-22).** This file was written when everything lived in one repo named `revit-vm`. As the architecture clarified, the split below emerged:
 
-Likely additions to the repo layout when service work begins:
+- **[vm-servers](https://github.com/joeblew999/vm-servers)** (you are here) — VM lifecycle: `start`/`stop`/`push`/`pull`, provider drivers (Hetzner / Vultr), R2-backed snapshots, RDP, debug helpers. The Mac-side control plane. Includes an embedded `gui/` folder (http-nu + Datastar) for browser-side viewing of the same state.
+- **[vm-software](https://github.com/joeblew999/vm-software)** — Windows installer catalog, git-cloned **inside the running Linux host of the VM** so `mise`+`nushell` on the host can drive per-app silent installs into the Windows guest via the shared folder.
+
+Cross-repo state lives in JSONL files committed to each repo: `vms.jsonl` (in vm-servers) and `installs.jsonl` (in vm-software). `git push` is the durability story; `git pull` is the "what's the world look like now" story. The embedded gui reads vm-servers's `vms.jsonl` locally and pulls vm-software for `installs.jsonl`.
+
+Likely additions to vm-servers when service work begins:
 
 ```
-revit-vm/
+vm-servers/
 ├── README.md / REVIT.md / SERVICE.md / CLAUDE.md   (already here)
 ├── <APP>.md per supported app (REVIT.md is the first)
 ├── mise.toml             (gains service:* tasks)
@@ -254,7 +259,7 @@ Adding a new operation to an existing app (cheaper than adding a new app):
 
 ## Cost model — flips from "VM rent" to "per-conversion"
 
-**Today (revit-vm as a personal tool):**
+**Today (vm-servers as a personal tool):**
 - You pay €0.045/hr while you're working, €0.48/mo for the snapshot when idle.
 - ~€1–5/mo for personal evaluation use.
 
@@ -309,4 +314,4 @@ The repo still works for solo work via `mise run start/stop`. Service mode is op
 - **Per-app vs unified snapshot.** Option A: one VM with all installed apps in one snapshot — bigger snapshot, smaller orchestrator. Option B: per-app snapshots, orchestrator picks which one to boot per job — more snapshot $$, but jobs of different apps can run in parallel on separate VMs. Defer until you have >1 app live.
 - **Pricing model.** Per-job flat fee? Per-minute? Per-MB-of-input? Per-app? Defer until you have real customer conversations.
 - **Failure modes.** App crash on malformed input. License expired mid-job. Disk full. Orchestrator needs retry logic + clear failure surfacing in the job status row.
-- **Repo name.** "revit-vm" is misleading once it hosts ImageMagick, ffmpeg, etc. Renaming is cheap — but only do it after the service is real enough to justify the change of public URL.
+- **Repo name.** ~~"revit-vm" is misleading once it hosts ImageMagick, ffmpeg, etc.~~ Done 2026-05-22 — renamed to `vm-servers`, with `vm-software` for the installer catalog. Web control plane lives as an embedded `gui/` folder rather than its own repo (smaller surface, co-located with the state-of-truth). See the note at the top of this file.

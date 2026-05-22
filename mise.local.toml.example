@@ -5,14 +5,48 @@
 # Put account-tied URLs here, NOT in mise.toml.
 
 [env]
-# Your personal Revit installer download URL from
-# manage.autodesk.com → Products & Services → Revit → Download.
-# Autodesk's URLs are signed and time-limited — typically valid for ~7 days
-# after generation; refresh as needed. The file behind the URL is YOUR
-# account's installer (it'll request your sign-in on first Revit launch
-# inside Windows, which is the trial-registration moment).
-REVIT_INSTALLER_URL = ""
+# (Per-app values like REVIT_INSTALLER_URL and TRIAL_STARTED moved to the
+# sibling vm-software repo's mise.local.toml.example — they belong with
+# the install tasks that consume them, not with VM lifecycle.)
 
-# Set this to the ISO date you signed into the trial (`mise run trial:remind`
-# uses it to count down).
-TRIAL_STARTED = ""
+# ── Provider selection ────────────────────────────────────────────────────
+# Default is Hetzner (cpx42 TCG — cheap, slow). Uncomment to switch to
+# Vultr Bare Metal (KVM, faster Windows install, more expensive, no native
+# snapshot UX yet — see CLAUDE.md → "Vultr snapshot pipeline").
+#
+# VM_PROVIDER = "vultr"
+#
+# When VM_PROVIDER=vultr, these are required:
+#   VULTR_REGION      — Vultr region ID; enumerate via `vultr-cli regions list`
+#                       common: "fra" (Frankfurt), "ams" (Amsterdam), "ewr" (NJ)
+#   VULTR_PLAN        — Vultr Bare Metal plan ID; enumerate via
+#                       `vultr-cli plans bm list`. Needs ≥6 cores for dockur
+#                       (CPU_CORES=6 in cloud-init-kvm.yaml).
+#   VULTR_SSH_KEY_ID  — UUID of the SSH key pre-uploaded to Vultr; enumerate
+#                       via `vultr-cli ssh list`. Must match SSH_KEY_FILE.
+#
+# VULTR_REGION = "fra"
+# VULTR_PLAN = ""
+# VULTR_SSH_KEY_ID = ""
+
+# ── Cloudflare R2 (snapshot transit bucket) ───────────────────────────────
+# Used by the Vultr snapshot pipeline (today) and future cross-provider
+# snapshot moves. R2 is "transit only" — Vultr keeps its own copy of the
+# snapshot once registered. Bootstrap one-time via `mise run r2:bootstrap`.
+#
+# R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
+# R2_BUCKET = "vm-servers-snapshots"
+#
+# Credentials go in the keychain (fnox), not here:
+#   fnox set -p keychain R2_ACCESS_KEY_ID
+#   fnox set -p keychain R2_SECRET_ACCESS_KEY
+
+# ── gui (embedded web control plane) ──────────────────────────────────────
+# Set this to the path of a sibling vm-software clone for the gui to
+# read installs.jsonl. Skip if you don't use the gui:* tasks.
+#
+# VM_SOFTWARE_REPO = "/Users/you/workspace/.../vm-software"
+#
+# Optional listen-address override (default 127.0.0.1:8080; use 0.0.0.0
+# to expose to LAN, or front with Caddy / Cloudflare Access for public).
+# HTTP_NU_ADDR = "0.0.0.0:8080"

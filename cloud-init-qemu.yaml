@@ -31,7 +31,7 @@ runcmd:
   - mkdir -p /root/oem
   - >
     curl -sSL -o /root/oem/install.bat
-    https://raw.githubusercontent.com/joeblew999/revit-vm/main/oem/install.bat
+    https://raw.githubusercontent.com/joeblew999/vm-servers/main/oem/install.bat
 
   # Run the dockur/windows container automatically.
   # KVM=N forces QEMU/TCG software emulation — Hetzner Cloud doesn't expose

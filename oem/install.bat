@@ -12,7 +12,7 @@
 :: \\host.lan\Data\install.log via Z: from the host).
 
 set LOG=C:\OEM\install.log
-echo === revit-vm oem/install.bat starting %DATE% %TIME% === > "%LOG%"
+echo === vm-servers oem/install.bat starting %DATE% %TIME% === > "%LOG%"
 
 :: 1. Map the shared folder as a persistent Z: drive so File Explorer
 ::    shows it without typing \\host.lan\Data every time.

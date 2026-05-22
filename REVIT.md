@@ -1,4 +1,4 @@
-# Running Autodesk Revit on revit-vm
+# Running Autodesk Revit on vm-servers
 
 Revit is the first/main use case for this repo, but the repo itself is generic (Hetzner + dockur/windows + Mac control plane — see [README.md](README.md) for that). This file is **only** the Revit-specific workflow, cost, and constraints.
 

@@ -1,4 +1,4 @@
-# fnox config for revit-vm
+# fnox config for vm-servers
 #
 # Secret VALUES live in macOS keychain (service: "fnox"); this file is just
 # the pointer table mapping env-var names → keychain item names. Safe to
@@ -15,3 +15,22 @@ service = "fnox"
 # https://console.hetzner.cloud → project → Security → API tokens (Read & Write).
 # hcloud reads $HCLOUD_TOKEN natively, so no `hcloud context create` step is needed.
 HCLOUD_TOKEN= { provider = "keychain", value = "HCLOUD_TOKEN" }
+
+# Vultr API key. Generate at https://my.vultr.com → Account → API.
+# Needs Read/Write; subnet-restrict to your home IP for safety. vultr-cli
+# reads $VULTR_API_KEY natively. Only needed when VM_PROVIDER=vultr.
+VULTR_API_KEY = { provider = "keychain", value = "VULTR_API_KEY" }
+
+# Cloudflare R2 — snapshot transit bucket (Phase 3 pipeline). Used by
+# both Vultr and (future) Hetzner cross-provider snapshot transfers. Get
+# Access Key ID + Secret Access Key from CF dashboard → R2 → Manage R2
+# API Tokens → Create API Token. Scope to the bucket from r2:bootstrap.
+#
+# aws-cli reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY natively, so
+# we expose the same keychain items under both R2_* and AWS_* names. The
+# aws calls in providers/vultr/snapshot*.nu and r2/*.nu pick up AWS_*
+# automatically through `fnox exec`.
+R2_ACCESS_KEY_ID = { provider = "keychain", value = "R2_ACCESS_KEY_ID" }
+R2_SECRET_ACCESS_KEY = { provider = "keychain", value = "R2_SECRET_ACCESS_KEY" }
+AWS_ACCESS_KEY_ID = { provider = "keychain", value = "R2_ACCESS_KEY_ID" }
+AWS_SECRET_ACCESS_KEY = { provider = "keychain", value = "R2_SECRET_ACCESS_KEY" }

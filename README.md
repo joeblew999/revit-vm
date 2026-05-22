@@ -1,4 +1,6 @@
-# revit-vm
+# vm-servers
+
+> *Formerly `revit-vm` — renamed when it became clear the same shape supports any Windows software, not just Revit. Sibling repo: [vm-software](https://github.com/joeblew999/vm-software) — Windows installer catalog, git-cloned inside the running VM's Linux host. The embedded `gui/` folder is a small http-nu status board for browser-side viewing.*
 
 Spin up a remote Windows VM on Hetzner Cloud, driven entirely by `mise run` tasks. Built on [dockur/windows](https://github.com/dockur/windows) — auto-downloads the Windows ISO, runs unattended setup, exposes a web viewer on port 8006 and RDP on 3389. Mac is the control plane.
 
@@ -50,7 +52,7 @@ Detailed price tables below if you want to do the arithmetic yourself.
 ### First-time setup (once per machine)
 
 ```
-mise install              # pulls hcloud + fnox via mise
+mise install              # pulls hcloud + vultr-cli + fnox via mise
 mise run token:set        # paste Hetzner API token at hidden prompt (stashed in macOS keychain)
 mise run start            # first run does the ~1hr Windows install; subsequent runs are ~90s
 ```
@@ -58,6 +60,37 @@ mise run start            # first run does the ~1hr Windows install; subsequent 
 **RDP login**: user `Docker`, password `admin` (dockur defaults — `mise run rdp:open` prefills the username; type the password when the client asks).
 
 **Optional local overrides** in `mise.local.toml` (gitignored — copy from `mise.local.toml.example`). Per-app — see the app's own doc (`REVIT.md`, etc.).
+
+### Switching provider: Hetzner ↔ Vultr
+
+Set `VM_PROVIDER` in `mise.local.toml` (defaults to `"hetzner"`). All daily-use tasks (`start`/`stop`/`push`/`pull`) and the shared `vm:*`/`rdp:*`/`debug:*` helpers dispatch on this var — you never type a provider-specific task name.
+
+```toml
+# mise.local.toml
+[env]
+VM_PROVIDER = "vultr"
+VULTR_REGION = "fra"             # mise run vultr:enumerate:regions
+VULTR_PLAN = "vbm-…"             # mise run vultr:enumerate:plans  (≥6c needed for dockur)
+VULTR_SSH_KEY_ID = "uuid"        # mise run vultr:enumerate:ssh
+```
+
+(or just `mise run vultr:setup` for an interactive walkthrough that prints all four enumerations side-by-side with your current selections.)
+
+Then:
+
+```
+mise run vultr:token:set    # one-time, paste Vultr API key
+mise run start              # provisions Vultr BM, runs cloud-init-kvm.yaml
+```
+
+**Snapshots on Vultr — Cloudflare R2 as transit.** Vultr Bare Metal has no native hot-snapshot, so `mise run stop` on Vultr streams the qcow2 disk to a CF R2 bucket, registers it with `vultr-cli snapshot create-url`, then deletes the R2 object once Vultr has its own copy. Per-provider snapshots are independent — Hetzner uses its native API, Vultr uses Vultr's snapshot store (just via R2 as the upload bridge). One-time R2 setup:
+
+```
+mise run r2:bootstrap       # guided walkthrough — CF dashboard for bucket + API token
+mise run r2:check           # PUT/GET/DELETE round-trip probe
+```
+
+Once R2 is wired, `mise run stop` on Vultr takes ~30-60 min (vs. ~3 min on Hetzner) — the dd|gzip|upload of ~40 GB over WAN is the long pole. Same `start` then restores from snapshot in a few minutes.
 
 ### Adding software
 
