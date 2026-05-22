@@ -138,27 +138,6 @@ def events-feed-render [] {
 </table></figure>"
 }
 
-# Costs reference: provider/SKU pricing from state/costs.jsonl. Static —
-# loaded on page render, not polled.
-def costs-render [] {
-    let path = "state/costs.jsonl"
-    if not ($path | path exists) { return "<aside><em>state/costs.jsonl missing</em></aside>" }
-    let rows = (open $path | lines | where ($it | str trim | is-not-empty) | each {|l| $l | from json })
-    let trs = ($rows | each {|r|
-        let cat = (html-esc ($r.category? | default '-'))
-        let prov = (html-esc ($r.provider? | default '-'))
-        let sku = (html-esc ($r.sku? | default ($r.name? | default '-')))
-        let note = (html-esc ($r.notes? | default ($r.note? | default '-')))
-        $"<tr><td>($cat)</td><td>($prov)</td><td><kbd>($sku)</kbd></td><td><small>($note)</small></td></tr>"
-    } | str join "\n")
-    $"<figure><table>
-  <thead><tr><th scope=\"col\">category</th><th scope=\"col\">provider</th><th scope=\"col\">sku / name</th><th scope=\"col\">notes</th></tr></thead>
-  <tbody>
-($trs)
-  </tbody>
-</table></figure>"
-}
-
 # The polled fragment: just the VMs table. Datastar re-fetches this every
 # POLL_MS and swaps it into the #vms-fragment div in the shell.
 def vms-fragment-render [] {
@@ -216,7 +195,6 @@ def render-status-board [] {
     let fragment = (vms-fragment-render)
     let snapshots = (snapshots-render)
     let runs = (runs-render)
-    let costs = (costs-render)
     let xs_addr = (html-esc ($env.XS_ADDR? | default '<unset>'))
     let poll_attrs = (if (reactive) {
         $"data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/vms-fragment`\)\""
@@ -271,11 +249,6 @@ def render-status-board [] {
   <section>
     <h2>Runs <small>— derived from vms.jsonl by state/runs.nu</small></h2>
 ($runs)
-  </section>
-
-  <section>
-    <h2>Costs <small>— provider/SKU pricing reference</small></h2>
-($costs)
   </section>
 
   <section>
