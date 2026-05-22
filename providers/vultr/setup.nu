@@ -28,7 +28,7 @@ print "(pick one; common: fra=Frankfurt, ams=Amsterdam, ewr=NJ)"
 print ""
 
 print "──── Bare Metal plans (≥6c only — what dockur needs) ────"
-nu providers/vultr/enumerate-plans.nu
+nu providers/vultr/plans-list.nu
 print ""
 
 print "──── SSH keys uploaded to your Vultr account ────"
@@ -38,7 +38,7 @@ print ""
 
 print "──── Ubuntu OS IDs ────"
 print "(default 1743 = Ubuntu 24.04 x64 — usually no need to change)"
-nu providers/vultr/enumerate-os.nu
+nu providers/vultr/os-list.nu
 print ""
 
 print "──── Next ────"

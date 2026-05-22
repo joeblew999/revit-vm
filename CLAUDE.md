@@ -6,7 +6,7 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 
 ## Decisions worth knowing (don't relitigate)
 
-1. **Two providers behind one switch.** `VM_PROVIDER` env (`"hetzner"` default, `"vultr"`) routes every dispatcher (`vm:up`, `vm:down`, `vm:ip`, `snapshot:*`). Hetzner-specific tasks (`vm:up-qemu`, `vm:up-kvm`, `token:set`) keep un-namespaced names; Vultr lives under `vultr:*`. Pricing tradeoffs in `costs.jsonl` (`mise run costs:show`).
+1. **Two providers behind one switch.** `VM_PROVIDER` env (`"hetzner"` default, `"vultr"`) routes every dispatcher (`vm:up`, `vm:down`, `vm:ip`, `snapshot:*`). Hetzner-specific tasks (`vm:qemu-up`, `vm:kvm-up`, `token:set`) keep un-namespaced names; Vultr lives under `vultr:*`. Pricing tradeoffs in `costs.jsonl` (`mise run costs:show`).
 
 2. **Two cloud-init variants.** `cloud-init-qemu.yaml` (TCG, `KVM=N`) for Hetzner Cloud — no `/dev/kvm` on any tier (verified live 2026-05-18). `cloud-init-kvm.yaml` for anywhere that does expose KVM (Hetzner Dedicated, Vultr Bare Metal).
 
@@ -25,8 +25,8 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 ## Don't
 
 - Don't put account-tied URLs (Autodesk installer, etc.) here — they belong in vm-software's `mise.local.toml`.
-- Don't run `vm:up-kvm` on Hetzner Cloud — fails at `docker run` (no `/dev/kvm`).
-- Don't remove `--restart=always` from the dockur container — breaks `vm:up-snap` (Windows wouldn't auto-start on snapshot restore).
+- Don't run `vm:kvm-up` on Hetzner Cloud — fails at `docker run` (no `/dev/kvm`).
+- Don't remove `--restart=always` from the dockur container — breaks `vm:snap-up` (Windows wouldn't auto-start on snapshot restore).
 - Don't remove `ssh-keygen -R` from `providers/hetzner/up*.nu` — Hetzner reuses project IPs; stale host keys would break every SSH-using task.
 - Don't remove `set -e` from `start` / `stop` — the snapshot-then-destroy ordering prevents data loss.
 - Don't bypass the R2 transit on Vultr. Vultr BM has no native hot-snapshot. If R2 isn't configured, `snapshot:create` errors clearly; don't add a "skip and destroy" fallback.

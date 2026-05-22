@@ -32,7 +32,7 @@ let has_snapshot = match $env.VM_PROVIDER {
 
 if $has_snapshot {
     print "→ booting from latest snapshot"
-    must "vm:up-snap" { ^nu lifecycle/dispatch.nu up-snap }
+    must "vm:snap-up" { ^nu lifecycle/dispatch.nu snap-up }
 } else {
     print "→ no snapshot — fresh provision (~1hr on Hetzner TCG, ~6 min on Vultr KVM)"
     must "vm:up" { ^nu lifecycle/dispatch.nu up }

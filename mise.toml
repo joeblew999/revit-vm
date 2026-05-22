@@ -99,7 +99,7 @@ run = "nu state/show.nu"
 description = "Derived view: one row per VM run (provisioned → destroyed). Derives from state/vms.jsonl; never writes."
 run = "nu state/runs.nu"
 
-[tasks."runs:json"]
+[tasks."runs:export"]
 description = "Same as runs:show but emits JSONL — pipe into other tools or `jq` for cost/duration analysis."
 run = "nu state/runs.nu --json"
 
@@ -114,6 +114,11 @@ run = "http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
 [tasks."gui:serve:bg"]
 description = "Same as `gui:serve` but under pitchfork so it survives this shell. Use for the deployed instance."
 run = "pitchfork run vm-servers-gui -- http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
+
+[tasks."mcp:serve"]
+description = "Nushell MCP server (stdio). Exposes a full nushell REPL so Claude Desktop / Claude Code can drive mise tasks directly. Long-running ops (snapshot, rdp:wait) auto-promote to background jobs."
+run = "nu --mcp"
+dir = "{{config_root}}"
 
 [tasks."gui:state:aggregate"]
 description = "Print the joined VMs + installs state as a table (CLI version of the gui's status board)."
@@ -133,25 +138,25 @@ description = "One-time: stash a Hetzner Cloud API token in macOS keychain via f
 run = "nu providers/hetzner/token-set.nu"
 
 # ── vm (provider-aware front doors) ───────────────────────────────────────
-# Hetzner-specific implementations (vm:up-qemu, vm:up-kvm) are defined
+# Hetzner-specific implementations (vm:qemu-up, vm:kvm-up) are defined
 # below. Vultr-specific tasks live under vultr:*. The vm:* switches route
 # by $VM_PROVIDER into providers/{hetzner,vultr}/*.nu.
 
-[tasks."vm:up-qemu"]
+[tasks."vm:qemu-up"]
 description = "[Hetzner] Provision with cloud-init-qemu.yaml (TCG / `KVM=N`). Required on Hetzner Cloud — no nested virt on any tier."
 run = "nu providers/hetzner/up.nu"
 
-[tasks."vm:up-kvm"]
+[tasks."vm:kvm-up"]
 description = "[Hetzner Dedicated only] Provision with cloud-init-kvm.yaml (passes --device=/dev/kvm). Fails on Hetzner Cloud. For Vultr Bare Metal use `mise run vm:up` with VM_PROVIDER=vultr."
-run = "nu providers/hetzner/up-kvm.nu"
+run = "nu providers/hetzner/kvm-up.nu"
 
 [tasks."vm:up"]
 description = "Provision a fresh VM with the active provider. Hetzner → cloud-init-qemu.yaml (TCG). Vultr Bare Metal → cloud-init-kvm.yaml (KVM)."
 run = "nu lifecycle/dispatch.nu up"
 
-[tasks."vm:up-snap"]
+[tasks."vm:snap-up"]
 description = "Provision from latest snapshot. Hetzner: native hcloud snapshot. Vultr: `bare-metal create --snapshot <id>` (requires R2-backed snapshot to exist)."
-run = "nu lifecycle/dispatch.nu up-snap"
+run = "nu lifecycle/dispatch.nu snap-up"
 
 [tasks."vm:down"]
 description = "Delete the VM. Both providers: snapshot first (via the `stop` task) to preserve state."
@@ -195,21 +200,21 @@ run = "nu providers/vultr/status.nu"
 description = "[Vultr] First-time setup wizard. Prints current VULTR_* selections and enumerates regions, BM plans (≥6c), SSH keys, and Ubuntu OS IDs. Run before your first `mise run start` with VM_PROVIDER=vultr."
 run = "nu providers/vultr/setup.nu"
 
-[tasks."vultr:enumerate:regions"]
+[tasks."vultr:regions:list"]
 description = "[Vultr] List all Vultr regions. Use the ID for VULTR_REGION in mise.local.toml."
-run = "nu providers/vultr/enumerate-regions.nu"
+run = "nu providers/vultr/regions-list.nu"
 
-[tasks."vultr:enumerate:plans"]
+[tasks."vultr:plans:list"]
 description = "[Vultr] List Bare Metal plans with ≥6 cores (what dockur needs). Use the ID for VULTR_PLAN."
-run = "nu providers/vultr/enumerate-plans.nu"
+run = "nu providers/vultr/plans-list.nu"
 
-[tasks."vultr:enumerate:ssh"]
+[tasks."vultr:ssh:list"]
 description = "[Vultr] List SSH keys uploaded to your Vultr account. Use the UUID for VULTR_SSH_KEY_ID."
-run = "nu providers/vultr/enumerate-ssh.nu"
+run = "nu providers/vultr/ssh-list.nu"
 
-[tasks."vultr:enumerate:os"]
+[tasks."vultr:os:list"]
 description = "[Vultr] List Ubuntu OS IDs available for fresh BM installs. Default 1743 = Ubuntu 24.04 x64."
-run = "nu providers/vultr/enumerate-os.nu"
+run = "nu providers/vultr/os-list.nu"
 
 # ── snapshot (provider-aware) ─────────────────────────────────────────────
 [tasks."snapshot:create"]
@@ -284,7 +289,7 @@ run = "nu debug/host-disk.nu"
 
 # ── Windows-side setup helper ─────────────────────────────────────────────
 
-[tasks.win-setup-ssh]
+[tasks."win:ssh-setup"]
 description = "Run this task ON THE WINDOWS MACHINE (as Admin) to configure OpenSSH and print Mac setup commands."
 shell = "powershell -Command"
 run = '''
