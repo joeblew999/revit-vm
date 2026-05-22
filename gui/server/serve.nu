@@ -46,14 +46,13 @@ def html-esc [s: any] {
 }
 
 # Wrap an HTML fragment as a Datastar SSE patch-elements event.
-# Datastar v1 needs SSE-formatted responses (not plain HTML) for @get/@post
-# to actually merge results into the DOM by ID match. Same pattern as the
-# sibling scrapers-catalogs uses for live fragments — single "elements "
-# directive with multi-line continuation, NOT "elements " on every line.
+# Collapse the HTML to a single line so we emit exactly one `data: elements`
+# directive — sidesteps the question of how Datastar v1 interprets multiple
+# elements directives or multi-line continuation in one event. Inside a
+# <pre>, callers should use <br> for visible line breaks instead of \n.
 def datastar-patch [html: string] {
-    let payload = $"elements ($html)"
-    let data_lines = ($payload | lines | each {|l| $"data: ($l)"} | str join "\n")
-    $"event: datastar-patch-elements\n($data_lines)\n\n"
+    let one_line = ($html | str replace --all "\n" " ")
+    $"event: datastar-patch-elements\ndata: elements ($one_line)\n\n"
 }
 
 def shell [title: string, body: string] {
@@ -401,16 +400,16 @@ def fire-and-forget [mise_task: string, opts: record = {}] {
             } else {
                 $"VM <kbd>($signals.label)</kbd> on <kbd>($signals.provider? | default $env.VM_PROVIDER)</kbd>"
             })
-            datastar-patch $"<pre id=\"action-output\"><code>start queued for ($label_msg)\npitchfork daemon: <kbd>($name)</kbd>\n`pitchfork logs ($name)` to tail</code></pre>"
+            datastar-patch $"<pre id=\"action-output\"><code>start queued for ($label_msg)<br>pitchfork daemon: <kbd>($name)</kbd><br>`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/vm/stop"]      => {
             let name = (fire-and-forget "stop" $signals)
             let label_msg = (if ($signals.label? | default "" | is-empty) { "default VM" } else { $"VM <kbd>($signals.label)</kbd>" })
-            datastar-patch $"<pre id=\"action-output\"><code>stop queued for ($label_msg) as pitchfork daemon <kbd>($name)</kbd>\nclean-shut Windows → snapshot → prune → destroy VM\n`pitchfork logs ($name)` to tail</code></pre>"
+            datastar-patch $"<pre id=\"action-output\"><code>stop queued for ($label_msg) as pitchfork daemon <kbd>($name)</kbd><br>clean-shut Windows → snapshot → prune → destroy VM<br>`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/snapshot/create"] => {
             let name = (fire-and-forget "snapshot:create" $signals)
-            datastar-patch $"<pre id=\"action-output\"><code>snapshot:create queued as pitchfork daemon <kbd>($name)</kbd>\nHetzner ~60s, Vultr 30-60 min\n`pitchfork logs ($name)` to tail</code></pre>"
+            datastar-patch $"<pre id=\"action-output\"><code>snapshot:create queued as pitchfork daemon <kbd>($name)</kbd><br>Hetzner ~60s, Vultr 30-60 min<br>`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["GET", "/api/jobs"]          => {
             # HTML fragment of `pitchfork list` for the Jobs section, wrapped
