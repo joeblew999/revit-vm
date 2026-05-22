@@ -98,9 +98,9 @@ run = "nu files/pull.nu"
 
 # ── costs ─────────────────────────────────────────────────────────────────
 [tasks."costs:show"]
-description = "Print costs.jsonl as a table. Queryable provider/SKU pricing — use to decide which provider + SKU fits your usage pattern."
+description = "Print state/costs.jsonl as a table. Queryable provider/SKU pricing — use to decide which provider + SKU fits your usage pattern."
 shell = "nu --commands"
-run = "open costs.jsonl | lines | each {|l| $l | from json } | table -e"
+run = "open state/costs.jsonl | lines | each {|l| $l | from json } | table -e"
 
 # ── state ─────────────────────────────────────────────────────────────────
 [tasks."state:show"]
@@ -196,15 +196,15 @@ run = "nu providers/hetzner/token-set.nu"
 # by $VM_PROVIDER into providers/{hetzner,vultr}/*.nu.
 
 [tasks."vm:qemu-up"]
-description = "[Hetzner] Provision with cloud-init-qemu.yaml (TCG / `KVM=N`). Required on Hetzner Cloud — no nested virt on any tier."
+description = "[Hetzner] Provision with cloud-init/qemu.yaml (TCG / `KVM=N`). Required on Hetzner Cloud — no nested virt on any tier."
 run = "nu providers/hetzner/up.nu"
 
 [tasks."vm:kvm-up"]
-description = "[Hetzner Dedicated only] Provision with cloud-init-kvm.yaml (passes --device=/dev/kvm). Fails on Hetzner Cloud. For Vultr Bare Metal use `mise run vm:up` with VM_PROVIDER=vultr."
+description = "[Hetzner Dedicated only] Provision with cloud-init/kvm.yaml (passes --device=/dev/kvm). Fails on Hetzner Cloud. For Vultr Bare Metal use `mise run vm:up` with VM_PROVIDER=vultr."
 run = "nu providers/hetzner/kvm-up.nu"
 
 [tasks."vm:up"]
-description = "Provision a fresh VM with the active provider. Hetzner → cloud-init-qemu.yaml (TCG). Vultr Bare Metal → cloud-init-kvm.yaml (KVM)."
+description = "Provision a fresh VM with the active provider. Hetzner → cloud-init/qemu.yaml (TCG). Vultr Bare Metal → cloud-init/kvm.yaml (KVM)."
 run = "nu lifecycle/dispatch.nu up"
 
 [tasks."vm:snap-up"]
@@ -238,7 +238,7 @@ description = "One-time: stash a Vultr API key in macOS keychain via fnox. Gener
 run = "nu providers/vultr/token-set.nu"
 
 [tasks."vultr:up"]
-description = "[Vultr] Provision a Bare Metal instance with cloud-init-kvm.yaml. Requires VULTR_REGION/PLAN/OS_ID/SSH_KEY_ID in mise.local.toml."
+description = "[Vultr] Provision a Bare Metal instance with cloud-init/kvm.yaml. Requires VULTR_REGION/PLAN/OS_ID/SSH_KEY_ID in mise.local.toml."
 run = "nu providers/vultr/up.nu"
 
 [tasks."vultr:down"]
@@ -313,7 +313,7 @@ run = "nu files/ls.nu"
 
 [tasks."viewer:open"]
 description = "Open dockur's web viewer (port 8006) in the default browser. Works as soon as dockur is up."
-run = "nu viewer/open.nu"
+run = "nu connect/viewer-open.nu"
 
 # ── debug ─────────────────────────────────────────────────────────────────
 [tasks."debug:ssh"]

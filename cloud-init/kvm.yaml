@@ -1,7 +1,7 @@
 #cloud-config
 # KVM variant — the original spec. Requires the host to expose /dev/kvm
 # (nested virtualization). Hetzner Cloud does NOT support this on any tier;
-# use the QEMU variant (cloud-init-qemu.yaml) there. This file is for hosts
+# use the QEMU variant (cloud-init/qemu.yaml) there. This file is for hosts
 # that DO expose KVM: Hetzner Dedicated Root Servers, other clouds' bare
 # metal SKUs (Vultr / OVH bare metal), or a local Linux KVM box.
 package_update: true
@@ -22,13 +22,13 @@ runcmd:
   - mkdir -p /root/windows_shared/jobs
   - mkdir -p /root/windows_shared/output
 
-  # OEM hook (see oem/install.bat in the repo): dockur copies this folder
+  # OEM hook (see cloud-init/oem.bat in the repo): dockur copies this folder
   # to C:\OEM inside the VM and runs install.bat as Admin during the final
   # step of the unattended Windows install — before any human logs in.
   - mkdir -p /root/oem
   - >
-    curl -sSL -o /root/oem/install.bat
-    https://raw.githubusercontent.com/joeblew999/vm-servers/main/oem/install.bat
+    curl -sSL -o /root/cloud-init/oem.bat
+    https://raw.githubusercontent.com/joeblew999/vm-servers/main/cloud-init/oem.bat
 
   # Run the dockur/windows container with KVM acceleration. Native speed.
   - >

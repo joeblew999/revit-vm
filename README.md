@@ -1,6 +1,6 @@
 # vm-servers
 
-Provision a remote Windows VM driven from a Mac via `mise` + `nushell` tasks. Built on [dockur/windows](https://github.com/dockur/windows) (auto-downloads Windows ISO + runs unattended setup) on top of Hetzner Cloud (TCG, cheap) or Vultr Bare Metal (KVM, fast).
+Provision a remote Windows VM driven from your dev box via `mise` + `nushell` tasks. Built on [dockur/windows](https://github.com/dockur/windows) (auto-downloads Windows ISO + runs unattended setup) on top of Hetzner Cloud (TCG, cheap) or Vultr Bare Metal (KVM, fast). Every tool installs via mise — no compilers, no curl-piped installers. Cross-platform: lifecycle + RDP layer dispatch on `$nu.os-info.name` (macOS via Homebrew + `open`; Linux via xfreerdp/remmina + `xdg-open`; Windows via the built-in `mstsc.exe`).
 
 Generic — any Windows software fits. Sibling [vm-software](https://github.com/joeblew999/vm-software) holds per-app install recipes; the embedded `gui/` folder is a small http-nu status board.
 
@@ -16,10 +16,11 @@ mise run stop             # snapshot → prune older → destroy VM
 ## Setup (per machine)
 
 ```sh
-mise install              # hcloud, vultr-cli, aws, fnox, nushell, pitchfork
+mise install              # hcloud, vultr-cli, aws, fnox, nushell, pitchfork, http-nu, xs, yoke
 mise run token:set        # paste Hetzner API token
 mise run start            # ~1hr first time (Windows install), ~90s thereafter
 ```
+
 
 To switch from Hetzner to Vultr Bare Metal, set `VM_PROVIDER = "vultr"` in `mise.local.toml` and follow `mise run vultr:setup`. Snapshot transit on Vultr uses Cloudflare R2 — run `mise run r2:bootstrap` once.
 
@@ -28,18 +29,18 @@ To switch from Hetzner to Vultr Bare Metal, set `VM_PROVIDER = "vultr"` in `mise
 ```
 mise.toml                 # all tasks (single surface)
 fnox.toml                 # secret pointer table (keychain-backed)
-cloud-init-*.yaml         # host bootstrap for fresh provisions
-oem/install.bat           # first-boot Windows setup (Z: mount, defender excludes, no sleep)
+cloud-init/               # qemu.yaml + kvm.yaml (host bootstrap) + oem.bat (Windows OEM hook)
 providers/{hetzner,vultr}/  # provider-specific .nu implementations
-connect/                  # rdp:wait / rdp:open / rdp:install
+lifecycle/                # start, stop, dispatch (orchestrators)
+connect/                  # rdp:* + viewer:open (connect to running VM)
 files/                    # push / pull / files:ls
 debug/                    # debug:ssh / probe / logs / metrics / version / host-disk
 deps/                     # deps:check (provider tools + token sanity)
-viewer/                   # viewer:open (dockur web viewer on :8006)
-gui/                      # http-nu status board (read-only)
 r2/                       # R2 bootstrap + sanity check (snapshot transit)
-state/vms.jsonl           # lifecycle event log; committed to git
-state/vms.schema.json     # JSONL contract (writers go through state/append.nu)
+mcp/                      # init.nu hook for mcp:serve + ai:ask
+ci/                       # syntax / schema / dispatch checks (same as GH Actions)
+gui/                      # http-nu status board (read-only v0; xs writes coming in v1)
+state/                    # vms.jsonl + vms.schema.json + runs.nu view + costs.jsonl
 ```
 
 `mise tasks` lists everything. See [CLAUDE.md](CLAUDE.md) for design decisions.

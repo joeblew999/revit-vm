@@ -1,5 +1,5 @@
 # List Vultr Bare Metal plans. Filter to those with ≥6 cores (dockur runs
-# Windows with CPU_CORES=6 in cloud-init-kvm.yaml). Use the ID column to
+# Windows with CPU_CORES=6 in cloud-init/kvm.yaml). Use the ID column to
 # set VULTR_PLAN in mise.local.toml.
 
 let raw = (^fnox exec --if-missing ignore -- vultr-cli plans metal -o json | from json)

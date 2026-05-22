@@ -6,9 +6,9 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 
 ## Decisions worth knowing (don't relitigate)
 
-1. **Two providers behind one switch.** `VM_PROVIDER` env (`"hetzner"` default, `"vultr"`) routes every dispatcher (`vm:up`, `vm:down`, `vm:ip`, `snapshot:*`). Hetzner-specific tasks (`vm:qemu-up`, `vm:kvm-up`, `token:set`) keep un-namespaced names; Vultr lives under `vultr:*`. Pricing tradeoffs in `costs.jsonl` (`mise run costs:show`).
+1. **Two providers behind one switch.** `VM_PROVIDER` env (`"hetzner"` default, `"vultr"`) routes every dispatcher (`vm:up`, `vm:down`, `vm:ip`, `snapshot:*`). Hetzner-specific tasks (`vm:qemu-up`, `vm:kvm-up`, `token:set`) keep un-namespaced names; Vultr lives under `vultr:*`. Pricing tradeoffs in `state/costs.jsonl` (`mise run costs:show`).
 
-2. **Two cloud-init variants.** `cloud-init-qemu.yaml` (TCG, `KVM=N`) for Hetzner Cloud — no `/dev/kvm` on any tier (verified live 2026-05-18). `cloud-init-kvm.yaml` for anywhere that does expose KVM (Hetzner Dedicated, Vultr Bare Metal).
+2. **Two cloud-init variants.** `cloud-init/qemu.yaml` (TCG, `KVM=N`) for Hetzner Cloud — no `/dev/kvm` on any tier (verified live 2026-05-18). `cloud-init/kvm.yaml` for anywhere that does expose KVM (Hetzner Dedicated, Vultr Bare Metal).
 
 3. **Snapshot-based persistence.** Fresh Windows install is ~1hr on Hetzner TCG; `stop` snapshots so future `start`s restore in ~90s. Hetzner uses its native snapshot API. Vultr has no hot-snapshot — `providers/vultr/snapshot-create.nu` streams the qcow2 via R2 (dd|gzip|aws s3 cp), registers via `vultr-cli snapshot create-url`, drops the R2 transit object. Expect 30-60 min per Vultr `stop`.
 

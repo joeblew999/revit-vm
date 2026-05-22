@@ -1,4 +1,4 @@
-# Provision a Vultr Bare Metal instance with cloud-init-kvm.yaml. Async —
+# Provision a Vultr Bare Metal instance with cloud-init/kvm.yaml. Async —
 # returns once the create call accepts; the BM takes 5-10 min to rack
 # and boot. Caller should run `rdp:wait` after to block until Windows is
 # RDP-ready.
@@ -10,7 +10,7 @@ if ($env.VULTR_SSH_KEY_ID | is-empty) { print -e "VULTR_SSH_KEY_ID not set in mi
 
 print $"creating Vultr Bare Metal: label=($env.VULTR_LABEL) region=($env.VULTR_REGION) plan=($env.VULTR_PLAN) os=($env.VULTR_OS_ID)"
 
-^fnox exec --if-missing ignore -- vultr-cli bare-metal create --region $env.VULTR_REGION --plan $env.VULTR_PLAN --os $env.VULTR_OS_ID --ssh $env.VULTR_SSH_KEY_ID --label $env.VULTR_LABEL --hostname $env.VULTR_LABEL --userdata-file cloud-init-kvm.yaml
+^fnox exec --if-missing ignore -- vultr-cli bare-metal create --region $env.VULTR_REGION --plan $env.VULTR_PLAN --os $env.VULTR_OS_ID --ssh $env.VULTR_SSH_KEY_ID --label $env.VULTR_LABEL --hostname $env.VULTR_LABEL --userdata-file cloud-init/kvm.yaml
 
 print ""
 print "Vultr BM provisioning started (async). Next:"
