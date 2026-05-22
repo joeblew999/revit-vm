@@ -141,6 +141,18 @@ def render-status-board [] {
   </section>
 
   <section>
+    <h2>Actions</h2>
+    <p><small>Buttons fire-and-forget via pitchfork; tail <code>/tmp/gui-action.log</code> for output. Watch the VMs table above for progress events.</small></p>
+    <div role=\"group\">
+      <button data-on-click=\"@post\(`/api/vm/start`\)\">Start</button>
+      <button data-on-click=\"@post\(`/api/vm/stop`\)\" class=\"secondary\">Stop</button>
+      <button data-on-click=\"@post\(`/api/snapshot/create`\)\" class=\"secondary\">Snapshot</button>
+      <button data-on-click=\"@get\(`/api/vm/status`\)\" class=\"contrast\">Refresh status</button>
+    </div>
+    <pre id=\"action-output\"><code>Click a button to act on the active provider's VM.</code></pre>
+  </section>
+
+  <section>
     <h2>Snapshots <small>— loaded on page load; refresh for fresh</small></h2>
 ($snapshots)
   </section>
@@ -152,6 +164,16 @@ def render-status-board [] {
 </main>"
 
     shell "vm-servers" $body
+}
+
+# Detach a long-running mise task so the HTTP response can return
+# immediately. Output is appended to /tmp/gui-action.log so the user
+# (or a future GET /api/logs) can tail it.
+def fire-and-forget [mise_task: string] {
+    let log = "/tmp/gui-action.log"
+    let stamp = (date now | format date "%Y-%m-%d %H:%M:%S")
+    $"\n===== ($stamp): mise run ($mise_task) =====\n" | save -a $log
+    ^bash -c $"nohup mise run ($mise_task) </dev/null >> ($log) 2>&1 &"
 }
 
 {|req|
@@ -166,6 +188,24 @@ def render-status-board [] {
             ^nu state/runs.nu --json
         }
         ["GET", "/api/vms-fragment"]  => { vms-fragment-render }
+        ["GET", "/api/vm/status"]     => {
+            # Sync: hits provider API, slow on first call but small response.
+            let out = (^nu lifecycle/dispatch.nu status | complete)
+            let body = (if $out.exit_code == 0 { $out.stdout } else { $"no vm \(or status errored\): ($out.stderr)" })
+            $"<pre id=\"action-output\"><code>(html-esc $body)</code></pre>"
+        }
+        ["POST", "/api/vm/start"]     => {
+            fire-and-forget "start"
+            "<pre id=\"action-output\"><code>start queued (provisions VM, waits for RDP, opens client) — tail /tmp/gui-action.log; VMs table above will show events</code></pre>"
+        }
+        ["POST", "/api/vm/stop"]      => {
+            fire-and-forget "stop"
+            "<pre id=\"action-output\"><code>stop queued (clean-shut Windows → snapshot → prune → destroy VM, 30-60 min on Vultr) — tail /tmp/gui-action.log</code></pre>"
+        }
+        ["POST", "/api/snapshot/create"] => {
+            fire-and-forget "snapshot:create"
+            "<pre id=\"action-output\"><code>snapshot:create queued — Hetzner ~60s, Vultr 30-60 min — tail /tmp/gui-action.log</code></pre>"
+        }
         ["GET", "/api/snapshots"]     => {
             # Live provider snapshot list (Hetzner or Vultr depending on $VM_PROVIDER).
             let provider = ($env.VM_PROVIDER? | default "")
