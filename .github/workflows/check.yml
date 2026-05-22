@@ -1,6 +1,6 @@
-# vm-servers has no compiled artifact — only nu scripts + mise.toml +
-# JSONL state. CI here is "things still parse and the schema still
-# matches" rather than build/test/release. No upload, no artifact.
+# Thin wrapper around `mise run ci`. Same scripts run locally — see
+# ci/{syntax,schema,dispatch}.nu and the `mise run ci` umbrella in
+# mise.toml. DRY: this workflow does NOT contain validation logic.
 name: check
 on:
   push:
@@ -13,74 +13,16 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mise
+      - name: Install mise + repo tools
         uses: jdx/mise-action@v2
         with:
           install: true
           cache: true
 
-      - name: Verify all mise tools install
-        run: mise install
-
-      - name: Verify mise.toml parses (tasks resolve)
-        run: mise tasks > /dev/null
-
-      - name: Parse-check every .nu file
-        shell: bash
-        run: |
-          set -e
-          fail=0
-          while IFS= read -r f; do
-            result=$(mise x -- nu --no-config-file -c "nu-check '$f'" 2>&1 || true)
-            if [ "$result" = "true" ]; then
-              echo "  ok  $f"
-            else
-              echo "  FAIL $f -> $result"
-              fail=1
-            fi
-          done < <(find . -name "*.nu" -not -path "./.git/*" | sort)
-          exit $fail
-
-      - name: Validate state/vms.jsonl against schema
-        shell: bash
-        run: |
-          pip install --quiet --user check-jsonschema
-          if [ -s state/vms.jsonl ]; then
-            python3 -m check_jsonschema --schemafile state/vms.schema.json state/vms.jsonl
-          else
-            echo "(state/vms.jsonl empty — nothing to validate)"
-          fi
-
-      - name: Dispatcher reports bad provider cleanly
-        shell: bash
-        run: |
-          set -e
-          # `env VAR=val cmd` overrides past mise's [env] injection — without
-          # it, `VM_PROVIDER=garbage` in front of `mise x` gets reset to
-          # mise.toml's default ("hetzner") before nu sees it.
-          out=$(mise x -- env VM_PROVIDER=garbage nu lifecycle/dispatch.nu up 2>&1 || true)
-          if echo "$out" | grep -q "VM_PROVIDER must be"; then
-            echo "ok: dispatcher rejects bad provider"
-          else
-            echo "FAIL: dispatcher did not reject bad provider"
-            echo "got: $out"
-            exit 1
-          fi
-
-      - name: Dispatcher reports missing action cleanly
-        shell: bash
-        run: |
-          set -e
-          out=$(mise x -- env VM_PROVIDER=hetzner nu lifecycle/dispatch.nu nonexistent-action 2>&1 || true)
-          if echo "$out" | grep -q "no such action"; then
-            echo "ok: dispatcher rejects missing action"
-          else
-            echo "FAIL: dispatcher did not reject missing action"
-            echo "got: $out"
-            exit 1
-          fi
+      - name: mise run ci
+        run: mise run ci

@@ -13,8 +13,12 @@
 
 ## v1 — write surface
 
-- [ ] **`mcp:serve` task** — `nu --mcp` turns vm-servers into an MCP server (stdio or
+- [x] **`mcp:serve` task** — `nu --mcp` turns vm-servers into an MCP server (stdio or
   HTTP); long-running ops auto-promote to background jobs so snapshot/rdp-wait don't block
+- [x] **`ai:ask` task + `mcp/init.nu`** — yoke (cablehead, same ecosystem as http-nu +
+  xs) drives one LLM agent turn as a unix pipe; `--tools nu --config mcp/init.nu` gives
+  the LLM an embedded nushell engine with `vm-state`, `vm-ip`, `vm-runs` and all mise
+  tasks. JSONL out; pipe to `tee { save }` + xs for session persistence
 - [ ] **`job spawn` in polling loops** — replace `mut elapsed / sleep 30sec` in
   `providers/vultr/snapshot-create.nu` and `connect/rdp-wait.nu` with nushell's native
   job mailbox (`job spawn` / `job recv`)

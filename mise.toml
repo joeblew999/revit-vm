@@ -27,6 +27,10 @@ pitchfork = "latest"
 # file system sync. Upstream cablehead/* doesn't yet ship release binaries.
 "github:joeblew999/http-nu" = "0.16.0-relay-url.2"
 "github:joeblew999/xs" = "0.12.0-relay-url.2"
+# yoke — single LLM agent turn as a unix pipe (cablehead, same ecosystem as
+# http-nu + xs). Powers ai:ask. JSONL in/out; --tools nu gives the LLM an
+# embedded nushell engine with access to lifecycle scripts and state.
+"github:cablehead/yoke" = "0.4.1"
 
 [env]
 # Which cloud the VM lives in. Default Hetzner (cpx42 TCG, slow but cheap).
@@ -120,6 +124,11 @@ description = "Nushell MCP server (stdio). Exposes a full nushell REPL so Claude
 run = "nu --mcp"
 dir = "{{config_root}}"
 
+[tasks."ai:ask"]
+description = "Ask the AI about your VM in natural language. One-shot; streams live to stdout. Usage: mise run ai:ask -- 'is my VM running?'. Requires ANTHROPIC_API_KEY in keychain. Save a session: pipe to tee { save -f sessions/foo.jsonl }; replay: cat sessions/foo.jsonl | mise run ai:ask -- 'follow-up'."
+run = "fnox exec --if-missing ignore -- yoke --provider anthropic --model claude-sonnet-4-5 --tools nu,read_file --config mcp/init.nu"
+dir = "{{config_root}}"
+
 [tasks."gui:state:aggregate"]
 description = "Print the joined VMs + installs state as a table (CLI version of the gui's status board)."
 run = "nu gui/state/aggregate.nu"
@@ -127,6 +136,27 @@ run = "nu gui/state/aggregate.nu"
 [tasks."gui:state:refresh"]
 description = "git pull on the sibling vm-software repo. vm-servers's own state/vms.jsonl is local — no pull needed."
 run = "nu gui/state/refresh.nu"
+
+# ── ci (repo health — exactly what GH Actions runs) ───────────────────────
+# Isomorphic: `mise run ci` locally produces the same result as the
+# .github/workflows/check.yml run on a push. The workflow is a thin
+# wrapper that does `mise install && mise run ci`.
+
+[tasks."ci"]
+description = "Run the full CI suite locally (syntax + schema + dispatcher smoke). Same scripts run in GH Actions."
+depends = ["ci:syntax", "ci:schema", "ci:dispatch"]
+
+[tasks."ci:syntax"]
+description = "Parse-check every .nu file via nushell's built-in nu-check."
+run = "nu ci/syntax.nu"
+
+[tasks."ci:schema"]
+description = "Validate state/vms.jsonl against state/vms.schema.json (pure-nu structural check)."
+run = "nu ci/schema.nu"
+
+[tasks."ci:dispatch"]
+description = "Smoke-test lifecycle/dispatch.nu's error paths (bad provider, missing action)."
+run = "nu ci/dispatch.nu"
 
 # ── deps + token ──────────────────────────────────────────────────────────
 [tasks."deps:check"]
