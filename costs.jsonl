@@ -13,4 +13,4 @@
 {"category":"egress","provider":"cloudflare","name":"r2","eur_per_tb":0,"notes":"Free egress is the reason we use R2 for snapshot transit."}
 {"category":"software","name":"windows-11","eur":0,"notes":"Downloaded by dockur from Microsoft; runs in evaluation mode without product key."}
 {"category":"software","name":"dockur-windows","eur":0,"notes":"MIT-licensed, public Docker Hub."}
-{"category":"app","name":"revit","note":"See vm-software/REVIT.md for licensing + trial workflow."}
+
