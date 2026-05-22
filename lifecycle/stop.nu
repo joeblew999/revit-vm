@@ -10,7 +10,7 @@ def must [label: string, cmd: closure] {
     }
 }
 
-let ip = (^nu providers/dispatch.nu ip | str trim)
+let ip = (^nu lifecycle/dispatch.nu ip | str trim)
 let key = ($env.SSH_KEY_FILE | str replace --regex '^~' $env.HOME)
 
 print "→ clean-shutting Windows (ACPI via docker stop, up to 120s)"
@@ -18,6 +18,6 @@ must "docker stop" {
     ^ssh -i $key -o StrictHostKeyChecking=accept-new $"root@($ip)" "docker stop --timeout=120 windows"
 }
 
-must "snapshot:create" { ^nu providers/dispatch.nu snapshot-create }
-must "snapshot:prune"  { ^nu providers/dispatch.nu snapshot-prune }
-must "vm:down"         { ^nu providers/dispatch.nu down }
+must "snapshot:create" { ^nu lifecycle/dispatch.nu snapshot-create }
+must "snapshot:prune"  { ^nu lifecycle/dispatch.nu snapshot-prune }
+must "vm:down"         { ^nu lifecycle/dispatch.nu down }

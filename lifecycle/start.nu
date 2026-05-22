@@ -1,5 +1,5 @@
 # Top-level `start` orchestrator: provisions (from snapshot if any, else
-# fresh), waits for RDP, opens it. Provider-aware via providers/dispatch.nu.
+# fresh), waits for RDP, opens it. Provider-aware via lifecycle/dispatch.nu.
 
 def must [label: string, cmd: closure] {
     do $cmd
@@ -32,10 +32,10 @@ let has_snapshot = match $env.VM_PROVIDER {
 
 if $has_snapshot {
     print "→ booting from latest snapshot"
-    must "vm:up-snap" { ^nu providers/dispatch.nu up-snap }
+    must "vm:up-snap" { ^nu lifecycle/dispatch.nu up-snap }
 } else {
     print "→ no snapshot — fresh provision (~1hr on Hetzner TCG, ~6 min on Vultr KVM)"
-    must "vm:up" { ^nu providers/dispatch.nu up }
+    must "vm:up" { ^nu lifecycle/dispatch.nu up }
 }
 
 must "rdp:wait"    { ^nu connect/rdp-wait.nu }

@@ -95,6 +95,14 @@ run = "open costs.jsonl | lines | each {|l| $l | from json } | table -e"
 description = "Show vm lifecycle events from state/vms.jsonl (provisioned / destroyed / snapshotted). The embedded gui (gui:* tasks) joins this with vm-software's installs.jsonl."
 run = "nu state/show.nu"
 
+[tasks."runs:show"]
+description = "Derived view: one row per VM run (provisioned → destroyed). Derives from state/vms.jsonl; never writes."
+run = "nu state/runs.nu"
+
+[tasks."runs:json"]
+description = "Same as runs:show but emits JSONL — pipe into other tools or `jq` for cost/duration analysis."
+run = "nu state/runs.nu --json"
+
 # ── gui (embedded web control plane, gui/*) ───────────────────────────────
 # Read-only status board. http-nu + xs are pinned in [tools] above.
 # Requires VM_SOFTWARE_REPO in mise.local.toml pointing at a sibling clone.
@@ -139,23 +147,23 @@ run = "nu providers/hetzner/up-kvm.nu"
 
 [tasks."vm:up"]
 description = "Provision a fresh VM with the active provider. Hetzner → cloud-init-qemu.yaml (TCG). Vultr Bare Metal → cloud-init-kvm.yaml (KVM)."
-run = "nu providers/dispatch.nu up"
+run = "nu lifecycle/dispatch.nu up"
 
 [tasks."vm:up-snap"]
 description = "Provision from latest snapshot. Hetzner: native hcloud snapshot. Vultr: `bare-metal create --snapshot <id>` (requires R2-backed snapshot to exist)."
-run = "nu providers/dispatch.nu up-snap"
+run = "nu lifecycle/dispatch.nu up-snap"
 
 [tasks."vm:down"]
 description = "Delete the VM. Both providers: snapshot first (via the `stop` task) to preserve state."
-run = "nu providers/dispatch.nu down"
+run = "nu lifecycle/dispatch.nu down"
 
 [tasks."vm:status"]
 description = "Describe the VM — IP, state, created-at. Non-zero exit if the VM doesn't exist."
-run = "nu providers/dispatch.nu status"
+run = "nu lifecycle/dispatch.nu status"
 
 [tasks."vm:ip"]
 description = "Print the VM's public IPv4. Dispatches on $VM_PROVIDER."
-run = "nu providers/dispatch.nu ip"
+run = "nu lifecycle/dispatch.nu ip"
 
 # ── r2 (Cloudflare R2 — snapshot transit bucket) ──────────────────────────
 [tasks."r2:bootstrap"]
@@ -206,11 +214,11 @@ run = "nu providers/vultr/enumerate-os.nu"
 # ── snapshot (provider-aware) ─────────────────────────────────────────────
 [tasks."snapshot:create"]
 description = "Snapshot the running VM. Hetzner: hot hcloud snapshot (caller clean-shuts Windows first). Vultr: dd|gzip|R2 upload → `vultr-cli snapshot create-url` → registers in Vultr's snapshot store."
-run = "nu providers/dispatch.nu snapshot-create"
+run = "nu lifecycle/dispatch.nu snapshot-create"
 
 [tasks."snapshot:list"]
 description = "List snapshots in the active provider's store."
-run = "nu providers/dispatch.nu snapshot-list"
+run = "nu lifecycle/dispatch.nu snapshot-list"
 
 [tasks."snapshot:prune"]
 description = """
@@ -219,7 +227,7 @@ Delete old snapshots, keep the N newest (default 1 — set via SNAPSHOTS_KEEP).
   mise run snapshot:prune                    → keeps newest 1
   SNAPSHOTS_KEEP=3 mise run snapshot:prune   → keeps newest 3
 """
-run = "nu providers/dispatch.nu snapshot-prune"
+run = "nu lifecycle/dispatch.nu snapshot-prune"
 
 # ── rdp ───────────────────────────────────────────────────────────────────
 [tasks."rdp:wait"]

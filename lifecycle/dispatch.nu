@@ -5,8 +5,8 @@
 # Mapping is convention-based: action "snapshot-create" → providers/<provider>/snapshot-create.nu.
 #
 # Usage:
-#   nu providers/dispatch.nu up
-#   nu providers/dispatch.nu snapshot-create
+#   nu lifecycle/dispatch.nu up
+#   nu lifecycle/dispatch.nu snapshot-create
 
 def main [action: string] {
     let provider = ($env.VM_PROVIDER? | default "")
