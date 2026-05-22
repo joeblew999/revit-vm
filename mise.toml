@@ -7,7 +7,6 @@
 #   connect/      → rdp:wait, rdp:open, rdp:install
 #   files/        → files:ls
 #   debug/        → debug:ssh, debug:probe, debug:logs, debug:metrics, debug:version, debug:host-disk
-#   software/     → software:fetch, software:fetch-revit, software:list
 #   viewer/       → viewer:open
 #   trial/        → trial:remind
 #   deps/         → deps:check
@@ -43,7 +42,7 @@ pitchfork = "latest"
 VM_PROVIDER = "hetzner"
 
 # Hetzner-side. Used when VM_PROVIDER=hetzner.
-SERVER_NAME = "revit-batch-node"
+SERVER_NAME = "windows-vm"
 SERVER_TYPE = "cpx42"
 SERVER_IMAGE = "ubuntu-24.04"
 SERVER_LOCATION = "fsn1"
@@ -61,7 +60,7 @@ VULTR_REGION = ""
 VULTR_PLAN = ""
 VULTR_OS_ID = "1743"
 VULTR_SSH_KEY_ID = ""
-VULTR_LABEL = "revit-batch-node"
+VULTR_LABEL = "windows-vm"
 
 # Cloudflare R2 — snapshot transit bucket (Phase 3). Provider-neutral;
 # both Vultr's `snapshot create-url` and a future Hetzner cross-provider
@@ -124,6 +123,12 @@ run = "nu files/push.nu"
 [tasks.pull]
 description = "Get a file/dir FROM the VM. Usage: `mise run pull -- <name>` (relative to /root/windows_shared on the VM, same as \\\\host.lan\\Data\\<name>)."
 run = "nu files/pull.nu"
+
+# ── costs ─────────────────────────────────────────────────────────────────
+[tasks."costs:show"]
+description = "Print costs.jsonl as a table. Queryable provider/SKU pricing — use to decide which provider + SKU fits your usage pattern."
+shell = "nu --commands"
+run = "open costs.jsonl | lines | each {|l| $l | from json } | table -e"
 
 # ── state ─────────────────────────────────────────────────────────────────
 [tasks."state:show"]

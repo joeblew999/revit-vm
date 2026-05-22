@@ -2,7 +2,7 @@
 # password `admin` (older dockur was empty — type admin when the client asks).
 
 let ip = (mise run vm:ip | str trim)
-let rdp = "/tmp/revit-batch-node.rdp"
+let rdp = "/tmp/vm-servers.rdp"
 
 $"full address:s:($ip):3389\nusername:s:Docker\nprompt for credentials:i:0\nscreen mode id:i:1\ndesktopwidth:i:1600\ndesktopheight:i:1000\nsession bpp:i:32\naudiomode:i:0\n" | save -f $rdp
 

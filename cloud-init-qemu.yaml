@@ -13,12 +13,10 @@ runcmd:
   - mkdir -p /root/windows_storage
 
   # Shared workspace: anything dropped here appears inside Windows as
-  # \\host.lan\Data — that's how you get .rvt files, batch-processor
-  # job specs, installers, and outputs across the Mac↔Windows boundary
-  # without RDP click-through. Drop files via `mise run workspace:push <file>`
-  # and `mise run software:fetch-*` tasks. cloud-init stays minimal on
-  # purpose — Windows app installs (Revit, RBP, …) are post-Windows-boot
-  # work, not bootstrap work.
+  # \\host.lan\Data — moves files, job specs, installers, outputs across
+  # the Mac↔Windows boundary without RDP click-through. cloud-init stays
+  # minimal on purpose — Windows app installs are post-boot work driven
+  # by the sibling vm-software repo (git-cloned inside the VM).
   - mkdir -p /root/windows_shared/installers
   - mkdir -p /root/windows_shared/jobs
   - mkdir -p /root/windows_shared/output

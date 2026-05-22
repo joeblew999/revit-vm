@@ -1,0 +1,16 @@
+{"category":"compute","provider":"hetzner-cloud","sku":"cpx42","cpu":8,"cpu_type":"AMD shared","ram_gb":16,"disk_gb":320,"eur_per_hour":0.0449,"eur_per_month_24x7":28.04,"kvm":false,"notes":"Current default. TCG only (Hetzner Cloud has no nested virt)."}
+{"category":"compute","provider":"hetzner-cloud","sku":"cpx52","cpu":12,"ram_gb":24,"disk_gb":480,"eur_per_hour":0.0644,"eur_per_month_24x7":40.14,"kvm":false}
+{"category":"compute","provider":"hetzner-cloud","sku":"cpx62","cpu":16,"ram_gb":32,"disk_gb":640,"eur_per_hour":0.1029,"eur_per_month_24x7":64.21,"kvm":false}
+{"category":"compute","provider":"hetzner-dedicated","sku":"ax41-nvme","cpu":6,"ram_gb":64,"disk_gb":512,"eur_per_month":39,"setup_fee_eur":39,"kvm":true,"notes":"30-day minimum, full-month bill. ~10x faster than cpx42 for KVM workloads."}
+{"category":"compute","provider":"vultr-bare-metal","sku":"vbm-4c-32gb-n","cpu":4,"ram_gb":32,"eur_per_hour":0.12,"kvm":true,"notes":"Hourly KVM, no minimum. <6c so bump if dockur CPU_CORES=6."}
+{"category":"compute","provider":"equinix-metal","sku":"varies","eur_per_hour_range":[0.10,0.30],"kvm":true,"notes":"Hourly KVM. Price/region SKU-dependent."}
+{"category":"compute","provider":"local","sku":"own-hardware","eur_per_hour":0,"kvm":true,"notes":"Needs residential IP."}
+{"category":"storage","provider":"hetzner-cloud","name":"snapshot","eur_per_gb_month":0.012,"typical_eur_per_month":0.48,"notes":"~40 GB used for Windows + RBP install"}
+{"category":"storage","provider":"hetzner-cloud","name":"volume","eur_per_gb_month":0.044}
+{"category":"storage","provider":"vultr","name":"snapshot","eur_per_month":0,"notes":"Free per Vultr; storage charged via R2 transit instead."}
+{"category":"storage","provider":"cloudflare","name":"r2","eur_per_gb_month":0.014,"notes":"Snapshot transit only; objects deleted after Vultr fetches."}
+{"category":"egress","provider":"hetzner-cloud","eur_per_tb_after_free":1,"free_tb_per_month":20}
+{"category":"egress","provider":"cloudflare","name":"r2","eur_per_tb":0,"notes":"Free egress is the reason we use R2 for snapshot transit."}
+{"category":"software","name":"windows-11","eur":0,"notes":"Downloaded by dockur from Microsoft; runs in evaluation mode without product key."}
+{"category":"software","name":"dockur-windows","eur":0,"notes":"MIT-licensed, public Docker Hub."}
+{"category":"app","name":"revit","note":"See vm-software/REVIT.md for licensing + trial workflow."}
