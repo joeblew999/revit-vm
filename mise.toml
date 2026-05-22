@@ -120,8 +120,17 @@ run = "nu state/runs.nu --json"
 # wrappers so users get a familiar `mise run ...` UX.
 
 [tasks."up"]
-description = "Bring the system up: pitchfork starts xs + gui. Open http://127.0.0.1:8080."
-run = "pitchfork start xs gui"
+description = "Bring the system up: pitchfork starts xs + gui, then prints where to go. Idempotent — 'already running' is fine."
+run = '''
+pitchfork start xs gui || true
+echo ""
+echo "  GUI  →  http://$HTTP_NU_ADDR"
+echo "  xs   →  $XS_ADDR  (event bus)"
+echo ""
+echo "  mise run jobs       # what's running"
+echo "  mise run down       # stop xs + gui"
+echo "  pitchfork logs gui  # tail the gui server"
+'''
 dir = "{{config_root}}"
 
 [tasks."down"]
