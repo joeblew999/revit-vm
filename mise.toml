@@ -115,31 +115,33 @@ run = "nu state/runs.nu"
 description = "Same as runs:show but emits JSONL — pipe into other tools or `jq` for cost/duration analysis."
 run = "nu state/runs.nu --json"
 
-# ── gui (embedded web control plane, gui/*) ───────────────────────────────
-# Read-only status board. http-nu + xs are pinned in [tools] above.
-# Requires VM_SOFTWARE_REPO in mise.local.toml pointing at a sibling clone.
+# ── gui (browser-side control plane, gui/*) ───────────────────────────────
+# All daemons are defined in pitchfork.toml. These mise tasks are thin
+# wrappers so users get a familiar `mise run ...` UX.
 
+[tasks."up"]
+description = "Bring the system up: pitchfork starts xs + gui. Open http://127.0.0.1:8080."
+run = "pitchfork start xs gui"
+dir = "{{config_root}}"
+
+[tasks."down"]
+description = "Take the system down: pitchfork stops xs + gui."
+run = "pitchfork stop xs gui"
+dir = "{{config_root}}"
+
+[tasks."jobs"]
+description = "Show what pitchfork is supervising right now (gui, xs, plus any per-action vm-action-* daemons spawned by the gui Start/Stop/Snapshot buttons)."
+run = "pitchfork list"
+
+# Interactive variants — block the shell, useful for dev / debugging the
+# serve script. Stop with Ctrl-C. For background, use `mise run up`.
 [tasks."gui:serve"]
-description = "Start the gui web server on $HTTP_NU_ADDR. Serves state/vms.jsonl (local) + $VM_SOFTWARE_REPO/state/installs.jsonl as a unified status board. --datastar serves the Datastar JS bundle at /datastar@<version>.js (no CDN dep)."
-run = "http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
-
-[tasks."gui:serve:bg"]
-description = "Same as `gui:serve` but under pitchfork so it survives this shell. Use for the deployed instance."
-run = "pitchfork run vm-servers-gui -- http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
+description = "Run the gui in the foreground (interactive). --watch hot-reloads on serve.nu changes so the running system evolves as you edit. For background use `mise run up`."
+run = "http-nu --datastar --watch $HTTP_NU_ADDR gui/server/serve.nu"
 
 [tasks."xs:serve"]
-description = "Start the xs event store. GUI and MCP both append/tail via XS_ADDR. Override XS_ADDR in mise.local.toml with an iroh relay URL for multi-machine sync (joeblew999/xs fork)."
+description = "Run xs in the foreground (interactive). For background use `mise run up`."
 run = "xs serve $XS_STORE --expose $XS_ADDR"
-dir = "{{config_root}}"
-
-[tasks."xs:serve:bg"]
-description = "Same as xs:serve but under pitchfork — survives the shell."
-run = "pitchfork run vm-servers-xs -- xs serve $XS_STORE --expose $XS_ADDR"
-dir = "{{config_root}}"
-
-[tasks."dev"]
-description = "Start the full local stack (xs event store + GUI web server). Both survive the shell via pitchfork. Open http://$HTTP_NU_ADDR. Stop with: pitchfork stop vm-servers-xs && pitchfork stop vm-servers-gui."
-run = "mise run xs:serve:bg && mise run gui:serve:bg && echo 'Stack up → http://$HTTP_NU_ADDR  (xs @ $XS_ADDR)'"
 dir = "{{config_root}}"
 
 [tasks."mcp:serve"]

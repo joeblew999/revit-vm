@@ -1,0 +1,34 @@
+# pitchfork daemons for the vm-servers control plane.
+#
+# Two long-running daemons fully define "the system is up":
+#   xs   — event bus that buffers vm.lifecycle events between writers
+#          (lifecycle scripts) and readers (gui SSE, MCP tail).
+#   gui  — http-nu serving the browser status board on $HTTP_NU_ADDR.
+#          Datastar-polled, Start/Stop/Snapshot buttons, lives at
+#          http://127.0.0.1:8080.
+#
+# Daily UX:
+#   pitchfork start xs gui     bring the system up
+#   pitchfork list             see what's running
+#   pitchfork logs gui         tail the gui's stdout
+#   pitchfork stop xs gui      bring the system down
+#
+# Or via mise (does the same thing, fewer keystrokes):
+#   mise run up                = pitchfork start xs gui
+#   mise run down              = pitchfork stop xs gui
+#
+# pitchfork uses `mise exec --` so http-nu / xs / nu are found via the
+# mise toolchain without needing to be on the system PATH.
+
+# Each daemon delegates to a mise task so it picks up mise.toml's [env]
+# (XS_ADDR / XS_STORE / HTTP_NU_ADDR) and {{config_root}} template
+# expansion — needed because the joeblew999/xs fork rejects relative
+# store paths.
+
+[daemons.xs]
+run = "mise run xs:serve"
+retry = 5
+
+[daemons.gui]
+run = "mise run gui:serve"
+retry = 5

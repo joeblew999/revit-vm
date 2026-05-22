@@ -191,7 +191,7 @@ def render-status-board [] {
 
   <section>
     <h2>Actions</h2>
-    <p><small>Buttons fire-and-forget via pitchfork; tail <code>/tmp/gui-action.log</code> for output. Watch the VMs table above for progress events.</small></p>
+    <p><small>Each button POSTs to a mise task that runs as a pitchfork-supervised daemon. See the Jobs section below for live status, or run <code>pitchfork list</code> / <code>pitchfork logs &lt;name&gt;</code> from the CLI.</small></p>
     <div role=\"group\">
       <button data-on-click=\"@post\(`/api/vm/start`\)\">Start</button>
       <button data-on-click=\"@post\(`/api/vm/stop`\)\" class=\"secondary\">Stop</button>
@@ -199,6 +199,13 @@ def render-status-board [] {
       <button data-on-click=\"@get\(`/api/vm/status`\)\" class=\"contrast\">Refresh status</button>
     </div>
     <pre id=\"action-output\"><code>Click a button to act on the active provider's VM.</code></pre>
+  </section>
+
+  <section>
+    <h2>Jobs <small>— pitchfork list, polled every ($POLL_MS / 1000)s</small></h2>
+    <div data-on-load=\"@get\(`/api/jobs`\)\" data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/jobs`\)\">
+      <pre id=\"jobs-fragment\"><code>loading...</code></pre>
+    </div>
   </section>
 
   <section>
@@ -232,14 +239,21 @@ def render-status-board [] {
     shell "vm-servers" $body
 }
 
-# Detach a long-running mise task so the HTTP response can return
-# immediately. Output is appended to /tmp/gui-action.log so the user
-# (or a future GET /api/logs) can tail it.
+# Spawn a long-running mise task under pitchfork so the HTTP response
+# returns immediately AND the user can see it / kill it / read its logs
+# via `pitchfork list`, `pitchfork stop NAME`, `pitchfork logs NAME` —
+# OR via the Jobs section in this gui, which calls `pitchfork list`.
+#
+# Each invocation gets a unique daemon name (vm-action-<task>-<ts>) so
+# two concurrent Starts don't collide.
 def fire-and-forget [mise_task: string] {
-    let log = "/tmp/gui-action.log"
-    let stamp = (date now | format date "%Y-%m-%d %H:%M:%S")
-    $"\n===== ($stamp): mise run ($mise_task) =====\n" | save -a $log
-    ^bash -c $"nohup mise run ($mise_task) </dev/null >> ($log) 2>&1 &"
+    let safe = ($mise_task | str replace --all ":" "-")
+    let stamp = (date now | format date "%H%M%S")
+    let name = $"vm-action-($safe)-($stamp)"
+    # pitchfork run is detached itself; the inner `mise run ...` inherits
+    # the pitchfork-supervised lifetime + logs.
+    ^pitchfork run $name -f -- mise run $mise_task
+    $name
 }
 
 {|req|
@@ -261,16 +275,25 @@ def fire-and-forget [mise_task: string] {
             $"<pre id=\"action-output\"><code>(html-esc $body)</code></pre>"
         }
         ["POST", "/api/vm/start"]     => {
-            fire-and-forget "start"
-            "<pre id=\"action-output\"><code>start queued (provisions VM, waits for RDP, opens client) — tail /tmp/gui-action.log; VMs table above will show events</code></pre>"
+            let name = (fire-and-forget "start")
+            $"<pre id=\"action-output\"><code>start queued as pitchfork daemon <kbd>($name)</kbd>\nVMs table above will show events; see Jobs section for live status\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/vm/stop"]      => {
-            fire-and-forget "stop"
-            "<pre id=\"action-output\"><code>stop queued (clean-shut Windows → snapshot → prune → destroy VM, 30-60 min on Vultr) — tail /tmp/gui-action.log</code></pre>"
+            let name = (fire-and-forget "stop")
+            $"<pre id=\"action-output\"><code>stop queued as pitchfork daemon <kbd>($name)</kbd>\nclean-shut Windows → snapshot → prune → destroy VM\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/snapshot/create"] => {
-            fire-and-forget "snapshot:create"
-            "<pre id=\"action-output\"><code>snapshot:create queued — Hetzner ~60s, Vultr 30-60 min — tail /tmp/gui-action.log</code></pre>"
+            let name = (fire-and-forget "snapshot:create")
+            $"<pre id=\"action-output\"><code>snapshot:create queued as pitchfork daemon <kbd>($name)</kbd>\nHetzner ~60s, Vultr 30-60 min\n`pitchfork logs ($name)` to tail</code></pre>"
+        }
+        ["GET", "/api/jobs"]          => {
+            # HTML fragment of `pitchfork list` for the Jobs section.
+            let out = (^pitchfork list --hide-header | complete)
+            if $out.exit_code != 0 or ($out.stdout | str trim | is-empty) {
+                "<pre id=\"jobs-fragment\"><code>no pitchfork daemons running</code></pre>"
+            } else {
+                $"<pre id=\"jobs-fragment\"><code>(html-esc $out.stdout)</code></pre>"
+            }
         }
         ["GET", "/api/snapshots"]     => {
             # Live provider snapshot list (Hetzner or Vultr depending on $VM_PROVIDER).
