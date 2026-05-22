@@ -22,6 +22,11 @@ fnox = "1.19.0"
 # pitchfork — process manager for the embedded gui (gui:serve:bg keeps
 # http-nu running across shell sessions). Only needed if you use the gui.
 pitchfork = "latest"
+# http-nu + xs — gui's HTTP server and event store. Installed from forks
+# under joeblew999/* (relay-url branch) that add iroh-relay support for
+# file system sync. Upstream cablehead/* doesn't yet ship release binaries.
+"github:joeblew999/http-nu" = "0.16.0-relay-url.2"
+"github:joeblew999/xs" = "0.12.0-relay-url.2"
 
 [env]
 # Which cloud the VM lives in. Default Hetzner (cpx42 TCG, slow but cheap).

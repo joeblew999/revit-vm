@@ -18,7 +18,7 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 
 6. **All task defs in root `mise.toml`.** Subfolder `mise.toml`s don't expose tasks to root without mise's experimental monorepo mode that breaks the 4-command UX. Tried 2026-05-22, rolled back. Encapsulation lives in per-stage folders' `.nu` files instead.
 
-7. **Tools are binary-only, no compilers needed.** `hcloud`, `vultr-cli`, `aws`, `fnox`, `nushell`, `pitchfork`. `http-nu` (used by `gui/`) is the one exception — install via `cargo install --git https://github.com/cablehead/http-nu`.
+7. **Tools are binary-only, no compilers needed.** `hcloud`, `vultr-cli`, `aws`, `fnox`, `nushell`, `pitchfork`, `http-nu`, `xs`. `http-nu` + `xs` install via mise's `github:` backend from the `joeblew999/*` forks (relay-url branch — adds iroh-relay support for FS sync). Upstream `cablehead/*` doesn't yet ship release binaries. Goal: any clone → `mise install` → working repo, no compilers, no cargo, no curl-piped install scripts.
 
 8. **fnox + mise for secrets.** Pointer table in `fnox.toml` maps env-var names to keychain items; `fnox set -p keychain <KEY>` writes; `fnox exec --if-missing ignore -- <cmd>` injects at runtime. `--if-missing ignore` is mandatory so missing other-provider secrets don't warn on every command.
 

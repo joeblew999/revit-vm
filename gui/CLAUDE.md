@@ -9,8 +9,8 @@ If the gui ever grows to manage multiple vm-servers instances (team setting, hos
 
 ## Stack
 
-- **[http-nu](https://github.com/cablehead/http-nu)** — HTTP server scriptable in nushell. Each route is a `{|req| ... }` closure. Install via `cargo install --git https://github.com/cablehead/http-nu` — not in the mise registry.
-- **[xs](https://github.com/cablehead/xs)** — event stream store. Will back write-actions in v1 (every UI button-press becomes an xs event). Install via `cargo install --git https://github.com/cablehead/xs`.
+- **[http-nu](https://github.com/joeblew999/http-nu)** — HTTP server scriptable in nushell. Each route is a `{|req| ... }` closure. Pinned in root `mise.toml` `[tools]` via `github:joeblew999/http-nu` (relay-url branch — adds iroh-relay support for FS sync; upstream cablehead doesn't ship release binaries).
+- **[xs](https://github.com/joeblew999/xs)** — event stream store. Will back write-actions in v1 (every UI button-press becomes an xs event). Pinned alongside http-nu via `github:joeblew999/xs`.
 - **[pitchfork](https://github.com/jdx/pitchfork)** — process manager for long-running operations. Pinned in `mise.toml` `[tools]`. The Vultr snapshot pipeline takes 30-60 min; pitchfork keeps it running across user sessions.
 - **[Datastar](https://data-star.dev)** — server-side reactivity. UI is plain HTML; http-nu pushes SSE patches. No JS framework.
 
