@@ -38,6 +38,16 @@ def html-esc [s: any] {
     | str replace -a "'" "&#39;"
 }
 
+# Wrap an HTML fragment as a Datastar SSE patch-elements event.
+# Datastar v1 needs SSE-formatted responses (not plain HTML) for @get/@post
+# to actually merge results into the DOM by ID match. Same pattern as the
+# sibling scrapers-catalogs uses for live fragments.
+def datastar-patch [html: string] {
+    let payload = $"elements ($html)"
+    let data_lines = ($payload | lines | each {|l| $"data: ($l)"} | str join "\n")
+    $"event: datastar-patch-elements\n($data_lines)\n\n"
+}
+
 def shell [title: string, body: string] {
     let script_tag = (if (reactive) { '<script type="module" src="/datastar@1.0.1.js"></script>' } else { "" })
     let title_esc = (html-esc $title)
@@ -196,6 +206,8 @@ def render-status-board [] {
     let snapshots = (snapshots-render)
     let runs = (runs-render)
     let xs_addr = (html-esc ($env.XS_ADDR? | default '<unset>'))
+    # <datalist> options for the label input — distinct labels from vms.jsonl.
+    let label_options = ($state.vms | each {|v| html-esc ($v.label? | default "") } | uniq | where ($it | is-not-empty) | each {|l| $"        <option value=\"($l)\">" } | str join "\n")
     let poll_attrs = (if (reactive) {
         $"data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/vms-fragment`\)\""
     } else { "" })
@@ -217,9 +229,12 @@ def render-status-board [] {
 
   <section data-signals=\"{label: '', provider: '($provider)'}\">
     <h2>Actions</h2>
-    <p><small>Each action POSTs to a mise task that runs as a pitchfork-supervised daemon. See the Jobs section below for live status. Multi-VM: type a unique <kbd>label</kbd> + pick a provider, then Start to provision a new one alongside any existing.</small></p>
+    <p><small>Type a VM <kbd>label</kbd> + pick a provider, then Start. Leave label blank to act on the default VM from <code>mise.toml</code>. The label field has autocomplete from VMs you've already provisioned. Action results show in the box below.</small></p>
     <fieldset role=\"group\">
-      <input name=\"label\" data-bind=\"label\" placeholder=\"vm label — blank uses default\">
+      <input name=\"label\" data-bind=\"label\" placeholder=\"e.g. windows-vm or my-second-vm\" list=\"known-labels\">
+      <datalist id=\"known-labels\">
+($label_options)
+      </datalist>
       <select name=\"provider\" data-bind=\"provider\">
         <option value=\"hetzner\">hetzner</option>
         <option value=\"vultr\">vultr</option>
@@ -231,7 +246,7 @@ def render-status-board [] {
       <button data-on-click=\"@post\(`/api/snapshot/create`\)\" class=\"secondary\">Snapshot</button>
       <button data-on-click=\"@get\(`/api/vm/status`\)\" class=\"contrast\">Refresh status</button>
     </div>
-    <pre id=\"action-output\"><code>Type a label + click Start to provision a new VM. Leave blank to act on the default VM from mise.toml.</code></pre>
+    <pre id=\"action-output\"><code>— click an action to see its response here —</code></pre>
   </section>
 
   <section>
@@ -331,12 +346,11 @@ def vm-env-from-form [form: record] {
             # Derived runs view — same data the CLI `runs:show` task prints.
             ^nu state/runs.nu --json
         }
-        ["GET", "/api/vms-fragment"]  => { vms-fragment-render }
         ["GET", "/api/vm/status"]     => {
             # Sync: hits provider API, slow on first call but small response.
             let out = (^nu lifecycle/dispatch.nu status | complete)
-            let body = (if $out.exit_code == 0 { $out.stdout } else { $"no vm \(or status errored\): ($out.stderr)" })
-            $"<pre id=\"action-output\"><code>(html-esc $body)</code></pre>"
+            let body_text = (if $out.exit_code == 0 { $out.stdout } else { $"no vm \(or status errored\): ($out.stderr)" })
+            datastar-patch $"<pre id=\"action-output\"><code>(html-esc $body_text)</code></pre>"
         }
         ["POST", "/api/vm/start"]     => {
             # Body is Datastar-posted JSON like {"label":"vm-b","provider":"hetzner"};
@@ -355,26 +369,29 @@ def vm-env-from-form [form: record] {
             } else {
                 $"VM <kbd>($form.label)</kbd> on <kbd>($form.provider? | default $env.VM_PROVIDER)</kbd>"
             })
-            $"<pre id=\"action-output\"><code>start queued for ($label_msg)\npitchfork daemon: <kbd>($name)</kbd>\n`pitchfork logs ($name)` to tail</code></pre>"
+            datastar-patch $"<pre id=\"action-output\"><code>start queued for ($label_msg)\npitchfork daemon: <kbd>($name)</kbd>\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/vm/stop"]      => {
             let name = (fire-and-forget "stop")
-            $"<pre id=\"action-output\"><code>stop queued as pitchfork daemon <kbd>($name)</kbd>\nclean-shut Windows → snapshot → prune → destroy VM\n`pitchfork logs ($name)` to tail</code></pre>"
+            datastar-patch $"<pre id=\"action-output\"><code>stop queued as pitchfork daemon <kbd>($name)</kbd>\nclean-shut Windows → snapshot → prune → destroy VM\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/snapshot/create"] => {
             let name = (fire-and-forget "snapshot:create")
-            $"<pre id=\"action-output\"><code>snapshot:create queued as pitchfork daemon <kbd>($name)</kbd>\nHetzner ~60s, Vultr 30-60 min\n`pitchfork logs ($name)` to tail</code></pre>"
+            datastar-patch $"<pre id=\"action-output\"><code>snapshot:create queued as pitchfork daemon <kbd>($name)</kbd>\nHetzner ~60s, Vultr 30-60 min\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["GET", "/api/jobs"]          => {
-            # HTML fragment of `pitchfork list` for the Jobs section.
+            # HTML fragment of `pitchfork list` for the Jobs section, wrapped
+            # as a Datastar patch so the merge actually happens.
             let out = (^pitchfork list --hide-header | complete)
-            if $out.exit_code != 0 or ($out.stdout | str trim | is-empty) {
+            let html = (if $out.exit_code != 0 or ($out.stdout | str trim | is-empty) {
                 "<pre id=\"jobs-fragment\"><code>no pitchfork daemons running</code></pre>"
             } else {
                 $"<pre id=\"jobs-fragment\"><code>(html-esc $out.stdout)</code></pre>"
-            }
+            })
+            datastar-patch $html
         }
-        ["GET", "/api/events-feed"]   => { events-feed-render }
+        ["GET", "/api/events-feed"]   => { datastar-patch (events-feed-render) }
+        ["GET", "/api/vms-fragment"]  => { datastar-patch (vms-fragment-render) }
         ["GET", "/api/snapshots"]     => {
             # Live provider snapshot list (Hetzner or Vultr depending on $VM_PROVIDER).
             let provider = ($env.VM_PROVIDER? | default "")

@@ -34,6 +34,10 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 
 14. **Compose primitives, don't wrap them.** The stack is layered — mise / pitchfork / nushell / http-nu / xs / Datastar / JSONL — and each layer already provides the glue the next would otherwise reinvent. Before writing a helper, parser, or detach wrapper, check the layer below: there's almost always a built-in command, an existing task, or a well-defined contract you can compose with. New abstractions are a tax; primitive composition is free. When in doubt, prefer reading the docs / the sibling repo's serve.nu / the binary's `--help` over inventing.
 
+15. **Parens inside `$"..."` interpolated strings are expression evaluation, even in HTML text.** This bit us three times in one session: `(blank = default)` parsed as nu assignment, `(auto-refresh ...)` as a command call, `(click an action ...)` same. In nushell, `($var)` interpolates and `(expr)` evaluates — that's recursive throughout the string. Rule: only use parens for actual variable refs or expressions; for human prose use em-dashes or brackets. Symptoms: the gui returns HTTP 500 with `Command \`X\` not found` in pitchfork logs.
+
+16. **Datastar v1 needs SSE-shaped responses for `@get`/`@post`, not plain HTML.** Returning raw `<pre>...</pre>` from a handler reaches the browser but never merges into the DOM (click → silent no-op). Wrap responses via `datastar-patch` (gui/server/serve.nu) which formats as `event: datastar-patch-elements` + `data: elements <html>` SSE. ID-based merge happens automatically. http-nu's body is `$in` at closure top — capture before any `let`/`match` shadows it; `"" | from json` errors *outside* try/catch so guard with `str trim | is-empty` first.
+
 ## Don't
 
 - Don't put account-tied URLs (Autodesk installer, etc.) here — they belong in vm-software's `mise.local.toml`.
