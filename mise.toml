@@ -70,46 +70,11 @@ REFRESH_INTERVAL_SEC = "10"
 
 [tasks.start]
 description = "RESUME WORK. Provisions a VM (from latest snapshot if any, else fresh), waits for Windows to be RDP-ready, opens RDP. Hetzner: ~90s from snapshot, ~1hr fresh. Vultr: ~6 min fresh on KVM (requires R2 bootstrap for the snapshot path)."
-run = '''
-set -e
-case "$VM_PROVIDER" in
-  hetzner)
-    if fnox exec --if-missing ignore -- hcloud image list --type snapshot -o json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-      echo "→ booting from latest Hetzner snapshot"
-      mise run vm:up-snap
-    else
-      echo "→ no snapshot — fresh Hetzner provision (~1hr for Windows install on TCG)"
-      mise run vm:up
-    fi
-    ;;
-  vultr)
-    if fnox exec --if-missing ignore -- vultr-cli snapshot list -o json 2>/dev/null | jq -e '(.snapshots // []) | map(select(.description | startswith("vm-servers-"))) | length > 0' >/dev/null; then
-      echo "→ booting from latest Vultr snapshot"
-      mise run vm:up-snap
-    else
-      echo "→ no snapshot — fresh Vultr Bare Metal provision (~6 min Windows install on KVM)"
-      mise run vm:up
-    fi
-    ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-mise run rdp:wait
-mise run rdp:open
-'''
+run = "nu lifecycle/start.nu"
 
 [tasks.stop]
 description = "END WORK. Clean-shuts Windows (ACPI via `docker stop --timeout=120`), snapshots (Hetzner: native ~60s; Vultr: dd → R2 → snapshot create-url, ~30-60 min), prunes older snapshots, destroys VM. ABORTS if any step fails — state is never destroyed without first being saved."
-run = '''
-set -e
-IP=$(mise run vm:ip)
-KEY="${SSH_KEY_FILE/#~/$HOME}"
-echo "→ clean-shutting Windows (ACPI via docker stop, up to 120s)"
-ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "docker stop --timeout=120 windows"
-mise run snapshot:create
-mise run snapshot:prune
-mise run vm:down
-'''
+run = "nu lifecycle/stop.nu"
 
 [tasks.push]
 description = "Send a local file/dir TO the VM. Usage: `mise run push -- <path>`. Appears in Windows at \\\\host.lan\\Data\\<basename>."
@@ -131,8 +96,7 @@ description = "Show vm lifecycle events from state/vms.jsonl (provisioned / dest
 run = "nu state/show.nu"
 
 # ── gui (embedded web control plane, gui/*) ───────────────────────────────
-# Read-only status board. Requires http-nu installed separately:
-#   cargo install --git https://github.com/cablehead/http-nu
+# Read-only status board. http-nu + xs are pinned in [tools] above.
 # Requires VM_SOFTWARE_REPO in mise.local.toml pointing at a sibling clone.
 
 [tasks."gui:serve"]
@@ -175,53 +139,23 @@ run = "nu providers/hetzner/up-kvm.nu"
 
 [tasks."vm:up"]
 description = "Provision a fresh VM with the active provider. Hetzner → cloud-init-qemu.yaml (TCG). Vultr Bare Metal → cloud-init-kvm.yaml (KVM)."
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) mise run vm:up-qemu ;;
-  vultr)   mise run vultr:up ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+run = "nu providers/dispatch.nu up"
 
 [tasks."vm:up-snap"]
-description = "Provision from latest snapshot. Hetzner: native hcloud snapshot. Vultr: `bare-metal create --snapshot <id>` (Phase 3, requires R2-backed snapshot to exist)."
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) nu providers/hetzner/up-snap.nu ;;
-  vultr)   nu providers/vultr/up-snap.nu ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+description = "Provision from latest snapshot. Hetzner: native hcloud snapshot. Vultr: `bare-metal create --snapshot <id>` (requires R2-backed snapshot to exist)."
+run = "nu providers/dispatch.nu up-snap"
 
 [tasks."vm:down"]
 description = "Delete the VM. Both providers: snapshot first (via the `stop` task) to preserve state."
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) nu providers/hetzner/down.nu ;;
-  vultr)   nu providers/vultr/down.nu ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+run = "nu providers/dispatch.nu down"
 
 [tasks."vm:status"]
 description = "Describe the VM — IP, state, created-at. Non-zero exit if the VM doesn't exist."
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) nu providers/hetzner/status.nu ;;
-  vultr)   nu providers/vultr/status.nu ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+run = "nu providers/dispatch.nu status"
 
 [tasks."vm:ip"]
 description = "Print the VM's public IPv4. Dispatches on $VM_PROVIDER."
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) nu providers/hetzner/ip.nu ;;
-  vultr)   nu providers/vultr/ip.nu ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+run = "nu providers/dispatch.nu ip"
 
 # ── r2 (Cloudflare R2 — snapshot transit bucket) ──────────────────────────
 [tasks."r2:bootstrap"]
@@ -271,24 +205,12 @@ run = "nu providers/vultr/enumerate-os.nu"
 
 # ── snapshot (provider-aware) ─────────────────────────────────────────────
 [tasks."snapshot:create"]
-description = "Snapshot the running VM. Hetzner: hot hcloud snapshot (caller clean-shuts Windows first). Vultr: dd|gzip|R2 upload → `vultr-cli snapshot create-url` → registers in Vultr's snapshot store (Phase 3)."
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) nu providers/hetzner/snapshot-create.nu ;;
-  vultr)   nu providers/vultr/snapshot-create.nu ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+description = "Snapshot the running VM. Hetzner: hot hcloud snapshot (caller clean-shuts Windows first). Vultr: dd|gzip|R2 upload → `vultr-cli snapshot create-url` → registers in Vultr's snapshot store."
+run = "nu providers/dispatch.nu snapshot-create"
 
 [tasks."snapshot:list"]
 description = "List snapshots in the active provider's store."
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) nu providers/hetzner/snapshot-list.nu ;;
-  vultr)   nu providers/vultr/snapshot-list.nu ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+run = "nu providers/dispatch.nu snapshot-list"
 
 [tasks."snapshot:prune"]
 description = """
@@ -297,13 +219,7 @@ Delete old snapshots, keep the N newest (default 1 — set via SNAPSHOTS_KEEP).
   mise run snapshot:prune                    → keeps newest 1
   SNAPSHOTS_KEEP=3 mise run snapshot:prune   → keeps newest 3
 """
-run = '''
-case "$VM_PROVIDER" in
-  hetzner) nu providers/hetzner/snapshot-prune.nu ;;
-  vultr)   nu providers/vultr/snapshot-prune.nu ;;
-  *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
-esac
-'''
+run = "nu providers/dispatch.nu snapshot-prune"
 
 # ── rdp ───────────────────────────────────────────────────────────────────
 [tasks."rdp:wait"]
