@@ -1,3 +1,4 @@
 {"action":"destroyed","label":"windows-vm","ts":"2026-05-22T15:50:45+0700","provider":"hetzner"}
 {"action":"provisioned-from-snapshot","label":"windows-vm","snapshot_id":"388127607","ip":"178.105.195.47","ts":"2026-05-22T15:52:02+0700","provider":"hetzner"}
 {"action":"destroyed","label":"windows-vm","ts":"2026-05-22T15:52:21+0700","provider":"hetzner"}
+{"action":"provisioned-from-snapshot","label":"windows-vm","snapshot_id":"388127607","ip":"178.105.195.47","ts":"2026-05-22T16:05:50+0700","provider":"hetzner"}

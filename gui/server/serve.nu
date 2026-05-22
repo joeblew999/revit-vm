@@ -20,6 +20,13 @@
 
 use ../state/lib.nu *
 
+# http-nu --datastar serves the embedded Datastar bundle at /datastar@*.js
+# for ANY version suffix (verified empirically). Hardcode 1.0.1 here; if
+# http-nu upgrades its embed, the URL still resolves (and http-nu's stdlib
+# exposes $DATASTAR_JS_PATH for scripts that want the precise version,
+# but using `use http-nu/datastar *` breaks plain-nu parse-check, so we
+# skip it).
+
 const PICO_CSS = "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
 const POLL_MS = 5000
 
@@ -41,7 +48,8 @@ def html-esc [s: any] {
 # Wrap an HTML fragment as a Datastar SSE patch-elements event.
 # Datastar v1 needs SSE-formatted responses (not plain HTML) for @get/@post
 # to actually merge results into the DOM by ID match. Same pattern as the
-# sibling scrapers-catalogs uses for live fragments.
+# sibling scrapers-catalogs uses for live fragments — single "elements "
+# directive with multi-line continuation, NOT "elements " on every line.
 def datastar-patch [html: string] {
     let payload = $"elements ($html)"
     let data_lines = ($payload | lines | each {|l| $"data: ($l)"} | str join "\n")
@@ -225,7 +233,7 @@ def render-status-board [] {
     # <datalist> options for the label input — distinct labels from vms.jsonl.
     let label_options = ($state.vms | each {|v| html-esc ($v.label? | default "") } | uniq | where ($it | is-not-empty) | each {|l| $"        <option value=\"($l)\">" } | str join "\n")
     let poll_attrs = (if (reactive) {
-        $"data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/vms-fragment`\)\""
+        $"data-on:interval__duration.($POLL_MS)ms=\"@get\(`/api/vms-fragment`\)\""
     } else { "" })
 
     let body = $"<main class=\"container\">
@@ -257,17 +265,17 @@ def render-status-board [] {
       </select>
     </fieldset>
     <div role=\"group\">
-      <button data-on-click=\"@post\(`/api/vm/start`\)\">Start</button>
-      <button data-on-click=\"@post\(`/api/vm/stop`\)\" class=\"secondary\">Stop</button>
-      <button data-on-click=\"@post\(`/api/snapshot/create`\)\" class=\"secondary\">Snapshot</button>
-      <button data-on-click=\"@get\(`/api/vm/status`\)\" class=\"contrast\">Refresh status</button>
+      <button data-on:click=\"@post\(`/api/vm/start`\)\">Start</button>
+      <button data-on:click=\"@post\(`/api/vm/stop`\)\" class=\"secondary\">Stop</button>
+      <button data-on:click=\"@post\(`/api/snapshot/create`\)\" class=\"secondary\">Snapshot</button>
+      <button data-on:click=\"@get\(`/api/vm/status`\)\" class=\"contrast\">Refresh status</button>
     </div>
     <pre id=\"action-output\"><code>— click an action to see its response here —</code></pre>
   </section>
 
   <section>
     <h2>Jobs <small>— pitchfork list, polled every ($POLL_MS / 1000)s</small></h2>
-    <div data-on-load=\"@get\(`/api/jobs`\)\" data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/jobs`\)\">
+    <div data-on:load=\"@get\(`/api/jobs`\)\" data-on:interval__duration.($POLL_MS)ms=\"@get\(`/api/jobs`\)\">
       <pre id=\"jobs-fragment\"><code>loading...</code></pre>
     </div>
   </section>
@@ -284,7 +292,7 @@ def render-status-board [] {
 
   <section>
     <h2>Live events <small>— last 30 lifecycle events, polled every ($POLL_MS / 1000)s</small></h2>
-    <div data-on-load=\"@get\(`/api/events-feed`\)\" data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/events-feed`\)\">
+    <div data-on:load=\"@get\(`/api/events-feed`\)\" data-on:interval__duration.($POLL_MS)ms=\"@get\(`/api/events-feed`\)\">
       <pre id=\"events-feed\"><code>loading ...</code></pre>
     </div>
     <p><small>Source: <code>state/vms.jsonl</code> — the on-disk truth. xs at <kbd>($xs_addr)</kbd> carries the same stream for live consumers like MCP. Tail xs directly: <code>mise x -- xs cat --follow --sse -T vm.lifecycle ($xs_addr)</code></small></p>
@@ -297,7 +305,7 @@ def render-status-board [] {
 
   <section>
     <h2>Server log <small>— last 15 errors from <code>pitchfork logs gui</code>, polled every ($POLL_MS / 1000)s</small></h2>
-    <div data-on-load=\"@get\(`/api/gui-errors`\)\" data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/gui-errors`\)\">
+    <div data-on:load=\"@get\(`/api/gui-errors`\)\" data-on:interval__duration.($POLL_MS)ms=\"@get\(`/api/gui-errors`\)\">
       <pre id=\"gui-errors\"><code>loading ...</code></pre>
     </div>
     <p><small>Surfaces watch-reload crashes here so you don't need to drop to a terminal. For full follow: <code>mise run gui:logs</code>.</small></p>
@@ -339,11 +347,22 @@ def fire-and-forget [mise_task: string, opts: record = {}] {
 
 {|req|
     # Capture body NOW — $in is the body stream at closure top, but later
-    # statements (`let`, `match`) shadow it. http-nu errors "channel closed"
-    # if you read $in for a request with no body, so wrap in try.
+    # statements (`let`, `match`) shadow it. Try/catch so GETs (which have
+    # no $in) don't crash with "channel closed".
     let body = (try { $in | default "" } catch { "" })
     let path = ($req.path | default "/")
     let method = ($req.method | default "GET")
+
+    # Datastar posts body as {"datastar": {...signals}}; unwrap to a flat
+    # record like {label: "...", provider: "..."}. Empty body / no body → {}.
+    let signals = (
+        if (($body | str trim) | is-empty) {
+            {}
+        } else {
+            let parsed = (try { $body | from json } catch { {} })
+            $parsed.datastar? | default $parsed
+        }
+    )
 
     match [$method, $path] {
         ["GET", "/"]                  => { render-status-board }
@@ -359,31 +378,21 @@ def fire-and-forget [mise_task: string, opts: record = {}] {
             datastar-patch $"<pre id=\"action-output\"><code>(html-esc $body_text)</code></pre>"
         }
         ["POST", "/api/vm/start"]     => {
-            # Body is Datastar-posted JSON like {"label":"vm-b","provider":"hetzner"};
-            # empty body → start the default VM. Guard `from json` because an
-            # empty-string JSON parse errors *outside* the try.
-            let form = (if (($body | str trim) | is-empty) {
-                {}
-            } else {
-                try { $body | from json } catch { {} }
-            })
-            let name = (fire-and-forget "start" $form)
-            let label_msg = (if ($form.label? | default "" | is-empty) {
+            let name = (fire-and-forget "start" $signals)
+            let label_msg = (if ($signals.label? | default "" | is-empty) {
                 "default VM"
             } else {
-                $"VM <kbd>($form.label)</kbd> on <kbd>($form.provider? | default $env.VM_PROVIDER)</kbd>"
+                $"VM <kbd>($signals.label)</kbd> on <kbd>($signals.provider? | default $env.VM_PROVIDER)</kbd>"
             })
             datastar-patch $"<pre id=\"action-output\"><code>start queued for ($label_msg)\npitchfork daemon: <kbd>($name)</kbd>\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/vm/stop"]      => {
-            let form = (if (($body | str trim) | is-empty) { {} } else { try { $body | from json } catch { {} } })
-            let name = (fire-and-forget "stop" $form)
-            let label_msg = (if ($form.label? | default "" | is-empty) { "default VM" } else { $"VM <kbd>($form.label)</kbd>" })
+            let name = (fire-and-forget "stop" $signals)
+            let label_msg = (if ($signals.label? | default "" | is-empty) { "default VM" } else { $"VM <kbd>($signals.label)</kbd>" })
             datastar-patch $"<pre id=\"action-output\"><code>stop queued for ($label_msg) as pitchfork daemon <kbd>($name)</kbd>\nclean-shut Windows → snapshot → prune → destroy VM\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/snapshot/create"] => {
-            let form = (if (($body | str trim) | is-empty) { {} } else { try { $body | from json } catch { {} } })
-            let name = (fire-and-forget "snapshot:create" $form)
+            let name = (fire-and-forget "snapshot:create" $signals)
             datastar-patch $"<pre id=\"action-output\"><code>snapshot:create queued as pitchfork daemon <kbd>($name)</kbd>\nHetzner ~60s, Vultr 30-60 min\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["GET", "/api/jobs"]          => {
