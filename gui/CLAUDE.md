@@ -12,7 +12,8 @@ If the gui ever grows to manage multiple vm-servers instances (team setting, hos
 - **[http-nu](https://github.com/joeblew999/http-nu)** — HTTP server scriptable in nushell. Each route is a `{|req| ... }` closure. Pinned in root `mise.toml` `[tools]` via `github:joeblew999/http-nu` (relay-url branch — adds iroh-relay support for FS sync; upstream cablehead doesn't ship release binaries).
 - **[xs](https://github.com/joeblew999/xs)** — event stream store. Will back write-actions in v1 (every UI button-press becomes an xs event). Pinned alongside http-nu via `github:joeblew999/xs`.
 - **[pitchfork](https://github.com/jdx/pitchfork)** — process manager for long-running operations. Pinned in `mise.toml` `[tools]`. The Vultr snapshot pipeline takes 30-60 min; pitchfork keeps it running across user sessions.
-- **[Datastar](https://data-star.dev)** — server-side reactivity. UI is plain HTML; http-nu pushes SSE patches. No JS framework.
+- **[Pico CSS](https://picocss.com)** — semantic-HTML-first stylesheet, loaded from CDN. No custom CSS in this repo. UI is `<header>` / `<main>` / `<section>` / `<table>` etc. — Pico styles them automatically. Same convention as sibling `joeblew999/scrapers-catalogs`.
+- **[Datastar](https://data-star.dev)** — server-side reactivity. UI is plain HTML; http-nu pushes SSE patches. No JS framework. The Datastar script tag is conditionally injected via `$env.REACTIVE` so v0 (read-only) skips it and v1 (write endpoints) lights it up.
 
 ## Layout
 
@@ -21,12 +22,14 @@ gui/
 ├── CLAUDE.md            (this file)
 ├── server/
 │   └── serve.nu         http-nu entry — routes inlined for now
-├── state/
-│   ├── aggregate.nu     CLI table view of joined vms + installs state
-│   └── refresh.nu       git pull on vm-software (vm-servers is local)
-└── static/
-    └── style.css        minimal type + table CSS
+└── state/
+    ├── lib.nu           aggregate_state (shared by server + CLI)
+    ├── aggregate.nu     CLI table view of joined vms + installs state
+    └── refresh.nu       git pull on vm-software (vm-servers is local)
 ```
+
+No `static/` folder — pico is CDN-loaded. If we need local assets later
+(images, datastar.js bundle), they land here.
 
 ## Read-only first
 
@@ -36,5 +39,6 @@ v0 = status board. v1 = POST endpoints that `mise run` lifecycle tasks (start/st
 
 - Don't add a database. State is JSONL in git. If you find yourself wanting SQLite, use xs.
 - Don't introduce a JS framework. Datastar + plain HTML.
+- Don't add custom CSS. Pico styles semantic HTML automatically; if it doesn't look right, use a more semantic element first. Reach for inline style or a fork of pico only as a last resort.
 - Don't put cloud-provider tokens here. They're in vm-servers's fnox keychain — gui tasks shell out to existing mise tasks that already know how to authenticate.
 - Don't `git commit` or `git push` without explicit user approval.
