@@ -22,7 +22,9 @@ use ../state/lib.nu *
 const PICO_CSS = "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
 
 def reactive [] {
-    ($env.REACTIVE? | default "0") != "0"
+    # Default ON. Matches sibling scrapers-catalogs convention. Set REACTIVE=0
+    # for static rendering (e.g. CI smoke tests, no JS environment).
+    ($env.REACTIVE? | default "1") != "0"
 }
 
 def html-esc [s: any] {
@@ -61,7 +63,7 @@ def render-vm-row [v: record, installs_recent: list] {
     $"<tr><td>($label)</td><td>($provider)</td><td>($action)</td><td><code>($ip)</code></td><td>($installs_for_vm)</td></tr>"
 }
 
-def render_status_board [] {
+def render-status-board [] {
     let state = (aggregate_state)
     let rows = ($state.vms | each {|v| render-vm-row $v $state.installs_recent } | str join "\n")
     let installs_repo = (html-esc ($env.VM_SOFTWARE_REPO? | default '<unset>'))
@@ -94,7 +96,7 @@ def render_status_board [] {
   </section>
 </main>"
 
-    {body: (shell "vm-servers" $body), headers: {"Content-Type": "text/html; charset=utf-8"}}
+    shell "vm-servers" $body
 }
 
 {|req|
@@ -102,13 +104,12 @@ def render_status_board [] {
     let method = ($req.method | default "GET")
 
     match [$method, $path] {
-        ["GET", "/"]          => { render_status_board }
-        ["GET", "/api/state"] => { {body: (aggregate_state | to json), headers: {"Content-Type": "application/json"}} }
+        ["GET", "/"]          => { render-status-board }
+        ["GET", "/api/state"] => { aggregate_state | to json }
         ["GET", "/api/runs"]  => {
             # Derived runs view — same data the CLI `runs:show` task prints.
-            let runs_out = (^nu state/runs.nu --json | complete)
-            {body: $runs_out.stdout, headers: {"Content-Type": "application/x-ndjson"}}
+            ^nu state/runs.nu --json
         }
-        _ => { {body: $"not found: ($method) ($path)", status: 404} }
+        _ => { $"not found: ($method) ($path)\n" }
     }
 }

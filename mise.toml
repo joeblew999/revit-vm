@@ -108,12 +108,12 @@ run = "nu state/runs.nu --json"
 # Requires VM_SOFTWARE_REPO in mise.local.toml pointing at a sibling clone.
 
 [tasks."gui:serve"]
-description = "Start the gui web server on $HTTP_NU_ADDR. Serves state/vms.jsonl (local) + $VM_SOFTWARE_REPO/state/installs.jsonl as a unified status board."
-run = "http-nu $env.HTTP_NU_ADDR gui/server/serve.nu"
+description = "Start the gui web server on $HTTP_NU_ADDR. Serves state/vms.jsonl (local) + $VM_SOFTWARE_REPO/state/installs.jsonl as a unified status board. --datastar serves the Datastar JS bundle at /datastar@<version>.js (no CDN dep)."
+run = "http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
 
 [tasks."gui:serve:bg"]
 description = "Same as `gui:serve` but under pitchfork so it survives this shell. Use for the deployed instance."
-run = "pitchfork run vm-servers-gui -- http-nu $env.HTTP_NU_ADDR gui/server/serve.nu"
+run = "pitchfork run vm-servers-gui -- http-nu --datastar $HTTP_NU_ADDR gui/server/serve.nu"
 
 [tasks."gui:state:aggregate"]
 description = "Print the joined VMs + installs state as a table (CLI version of the gui's status board)."
