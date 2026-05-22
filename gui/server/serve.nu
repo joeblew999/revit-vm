@@ -315,44 +315,26 @@ def render-status-board [] {
 # Each invocation gets a unique daemon name (vm-action-<task>-<ts>-<label>)
 # so concurrent actions across multiple VMs don't collide.
 #
-# env_vars: optional record of overrides (e.g. {SERVER_NAME: "vm-b"})
-# wrapped via bash so they actually reach the mise child process.
-def fire-and-forget [mise_task: string, env_vars: record = {}] {
+# `label`/`provider` overrides are passed as CLI flags to the mise task
+# (mise run X -- --label Y), NOT as env vars — mise's [env] re-injection
+# would clobber bash-prefix env overrides (we hit this exact issue in CI
+# and again on 2026-05-22 with the gui label not reaching providers/*).
+# lifecycle/{start,stop}.nu's `def main` consume --label / --provider.
+def fire-and-forget [mise_task: string, opts: record = {}] {
     let safe = ($mise_task | str replace --all ":" "-")
     let stamp = (date now | format date "%H%M%S")
-    let label_tag = ($env_vars.SERVER_NAME? | default ($env_vars.VULTR_LABEL? | default ""))
-    let name = (if ($label_tag | is-empty) {
+    let label = ($opts.label? | default "" | str trim)
+    let provider = ($opts.provider? | default "" | str trim)
+    let name = (if ($label | is-empty) {
         $"vm-action-($safe)-($stamp)"
     } else {
-        $"vm-action-($safe)-($label_tag)-($stamp)"
+        $"vm-action-($safe)-($label)-($stamp)"
     })
-    if ($env_vars | columns | is-empty) {
-        ^pitchfork run $name -f -- mise run $mise_task
-    } else {
-        let prefix = ($env_vars | columns | each {|k|
-            let v = ($env_vars | get $k)
-            $"($k)='($v)'"
-        } | str join " ")
-        ^pitchfork run $name -f -- bash -c $"($prefix) mise run ($mise_task)"
-    }
+    mut args = ["run" $mise_task "--"]
+    if ($label | is-not-empty)    { $args = ($args | append ["--label" $label]) }
+    if ($provider | is-not-empty) { $args = ($args | append ["--provider" $provider]) }
+    ^pitchfork run $name -f -- mise ...$args
     $name
-}
-
-# Build env-override record for a labeled VM start. Per-provider knows
-# which env var carries the label (SERVER_NAME on Hetzner, VULTR_LABEL on
-# Vultr). Returns {} when no label provided — caller falls back to defaults.
-# Input is a record (e.g. parsed from Datastar's JSON POST body).
-def vm-env-from-form [form: record] {
-    let label = ($form.label? | default "" | str trim)
-    if ($label | is-empty) { return {} }
-    let provider = ($form.provider? | default $env.VM_PROVIDER)
-    mut e = {VM_PROVIDER: $provider}
-    if $provider == "hetzner" {
-        $e = ($e | upsert SERVER_NAME $label)
-    } else if $provider == "vultr" {
-        $e = ($e | upsert VULTR_LABEL $label)
-    }
-    $e
 }
 
 {|req|
@@ -379,15 +361,13 @@ def vm-env-from-form [form: record] {
         ["POST", "/api/vm/start"]     => {
             # Body is Datastar-posted JSON like {"label":"vm-b","provider":"hetzner"};
             # empty body → start the default VM. Guard `from json` because an
-            # empty-string JSON parse errors *outside* the try (likely from
-            # the streaming parser before try sees it).
+            # empty-string JSON parse errors *outside* the try.
             let form = (if (($body | str trim) | is-empty) {
                 {}
             } else {
                 try { $body | from json } catch { {} }
             })
-            let env_overrides = (vm-env-from-form $form)
-            let name = (fire-and-forget "start" $env_overrides)
+            let name = (fire-and-forget "start" $form)
             let label_msg = (if ($form.label? | default "" | is-empty) {
                 "default VM"
             } else {
@@ -396,11 +376,14 @@ def vm-env-from-form [form: record] {
             datastar-patch $"<pre id=\"action-output\"><code>start queued for ($label_msg)\npitchfork daemon: <kbd>($name)</kbd>\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/vm/stop"]      => {
-            let name = (fire-and-forget "stop")
-            datastar-patch $"<pre id=\"action-output\"><code>stop queued as pitchfork daemon <kbd>($name)</kbd>\nclean-shut Windows → snapshot → prune → destroy VM\n`pitchfork logs ($name)` to tail</code></pre>"
+            let form = (if (($body | str trim) | is-empty) { {} } else { try { $body | from json } catch { {} } })
+            let name = (fire-and-forget "stop" $form)
+            let label_msg = (if ($form.label? | default "" | is-empty) { "default VM" } else { $"VM <kbd>($form.label)</kbd>" })
+            datastar-patch $"<pre id=\"action-output\"><code>stop queued for ($label_msg) as pitchfork daemon <kbd>($name)</kbd>\nclean-shut Windows → snapshot → prune → destroy VM\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/snapshot/create"] => {
-            let name = (fire-and-forget "snapshot:create")
+            let form = (if (($body | str trim) | is-empty) { {} } else { try { $body | from json } catch { {} } })
+            let name = (fire-and-forget "snapshot:create" $form)
             datastar-patch $"<pre id=\"action-output\"><code>snapshot:create queued as pitchfork daemon <kbd>($name)</kbd>\nHetzner ~60s, Vultr 30-60 min\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["GET", "/api/jobs"]          => {
