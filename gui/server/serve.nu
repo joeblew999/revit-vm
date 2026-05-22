@@ -3,31 +3,13 @@
 #
 # Lives inside vm-servers, so `vms.jsonl` is the local repo's own state
 # file (state/vms.jsonl). Installs state comes from the sibling vm-software
-# repo clone via $VM_SOFTWARE_REPO.
+# repo clone via $VM_SOFTWARE_REPO. The aggregate_state join lives in
+# gui/state/lib.nu — shared with the CLI view (gui/state/aggregate.nu).
 #
 # Skeleton — read-only status board. Returns one HTML page on GET /,
 # JSON state on GET /api/state, and 404 elsewhere.
 
-def aggregate_state [] {
-    let vms_path = "state/vms.jsonl"
-    let installs_path = $"($env.VM_SOFTWARE_REPO)/state/installs.jsonl"
-
-    let vms = (if ($vms_path | path exists) {
-        open $vms_path | lines | where ($it | is-not-empty) | each {|l| $l | from json }
-    } else { [] })
-
-    let installs = (if ($installs_path | path exists) {
-        open $installs_path | lines | where ($it | is-not-empty) | each {|l| $l | from json }
-    } else { [] })
-
-    let latest_vms = ($vms | group-by label | values | each {|grp| $grp | sort-by ts | last })
-
-    {
-        vms: $latest_vms,
-        installs_count: ($installs | length),
-        installs_recent: ($installs | sort-by ts | last 10)
-    }
-}
+use ../state/lib.nu *
 
 def render_status_board [] {
     let state = (aggregate_state)

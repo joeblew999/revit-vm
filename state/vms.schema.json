@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/joeblew999/vm-servers/state/vms.schema.json",
+  "title": "vm-servers VM lifecycle event",
+  "description": "One JSON object per line in state/vms.jsonl. Every line is independent (no header). Writers go through state/append.nu's typed subcommands — see that file for the enforcement surface. JSONL has no header concept; this schema is the out-of-band contract.",
+  "type": "object",
+  "required": ["action", "label", "ts", "provider"],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["provisioned", "provisioned-from-snapshot", "snapshotted", "destroyed"]
+    },
+    "label": {
+      "type": "string",
+      "description": "VM identity. Hetzner: $SERVER_NAME. Vultr: $VULTR_LABEL."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 with offset. Set by state/append.nu."
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["hetzner", "vultr"],
+      "description": "Set by state/append.nu from $VM_PROVIDER."
+    }
+  },
+  "oneOf": [
+    {
+      "title": "provisioned — fresh VM created (not from snapshot)",
+      "properties": {
+        "action": {"const": "provisioned"},
+        "flavor": {"type": "string", "enum": ["qemu", "kvm"], "description": "dockur virtualization mode. qemu = TCG (Hetzner Cloud), kvm = nested virt (Hetzner Dedicated, Vultr Bare Metal)."},
+        "ip": {"type": "string", "description": "Public IPv4. Optional on Vultr because provisioning is async and the IP isn't assigned at create-time."},
+        "region": {"type": "string", "description": "Vultr only."},
+        "plan": {"type": "string", "description": "Vultr only."}
+      },
+      "required": ["flavor"],
+      "additionalProperties": false,
+      "unevaluatedProperties": false
+    },
+    {
+      "title": "provisioned-from-snapshot — VM created from an existing snapshot",
+      "properties": {
+        "action": {"const": "provisioned-from-snapshot"},
+        "snapshot_id": {"type": "string"},
+        "ip": {"type": "string", "description": "Public IPv4. Optional on Vultr (async)."}
+      },
+      "required": ["snapshot_id"],
+      "additionalProperties": false,
+      "unevaluatedProperties": false
+    },
+    {
+      "title": "snapshotted — snapshot taken of a running VM",
+      "properties": {
+        "action": {"const": "snapshotted"},
+        "description": {"type": "string", "description": "Human-readable snapshot name."},
+        "snapshot_id": {"type": "string", "description": "Provider-side snapshot ID. Optional today — Vultr always sets it, Hetzner does when capturable."}
+      },
+      "required": ["description"],
+      "additionalProperties": false,
+      "unevaluatedProperties": false
+    },
+    {
+      "title": "destroyed — VM deleted",
+      "properties": {
+        "action": {"const": "destroyed"},
+        "bm_id": {"type": "string", "description": "Vultr only — the bare-metal instance ID that was deleted."}
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false
+    }
+  ],
+  "examples": [
+    {"action": "provisioned", "label": "windows-vm", "flavor": "qemu", "ip": "1.2.3.4", "ts": "2026-05-22T10:00:00+0200", "provider": "hetzner"},
+    {"action": "provisioned", "label": "windows-vm", "flavor": "kvm", "region": "ewr", "plan": "vbm-4c-32gb", "ts": "2026-05-22T10:00:00-0400", "provider": "vultr"},
+    {"action": "snapshotted", "label": "windows-vm", "description": "windows-vm-20260522-180000", "snapshot_id": "12345", "ts": "2026-05-22T18:00:00+0200", "provider": "hetzner"},
+    {"action": "destroyed", "label": "windows-vm", "ts": "2026-05-22T18:05:00+0200", "provider": "hetzner"}
+  ]
+}

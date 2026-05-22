@@ -26,18 +26,20 @@ To switch from Hetzner to Vultr Bare Metal, set `VM_PROVIDER = "vultr"` in `mise
 ## Layout
 
 ```
-mise.toml              # all tasks (single surface)
-fnox.toml              # secret pointer table (keychain-backed)
-cloud-init-*.yaml      # host bootstrap for fresh provisions
-oem/install.bat        # first-boot Windows setup (Z: mount, defender excludes, no sleep)
-providers/{hetzner,vultr}/   # provider-specific .nu implementations
-connect/               # rdp:wait / rdp:open / rdp:install
-files/                 # push / pull / files:ls
-debug/                 # debug:ssh / probe / logs / metrics / version / host-disk
-software/, trial/, windows-runner/ → moved to vm-software
-gui/                   # http-nu status board (read-only)
-state/vms.jsonl        # lifecycle event log; committed to git
-r2/                    # R2 bootstrap + sanity check
+mise.toml                 # all tasks (single surface)
+fnox.toml                 # secret pointer table (keychain-backed)
+cloud-init-*.yaml         # host bootstrap for fresh provisions
+oem/install.bat           # first-boot Windows setup (Z: mount, defender excludes, no sleep)
+providers/{hetzner,vultr}/  # provider-specific .nu implementations
+connect/                  # rdp:wait / rdp:open / rdp:install
+files/                    # push / pull / files:ls
+debug/                    # debug:ssh / probe / logs / metrics / version / host-disk
+deps/                     # deps:check (provider tools + token sanity)
+viewer/                   # viewer:open (dockur web viewer on :8006)
+gui/                      # http-nu status board (read-only)
+r2/                       # R2 bootstrap + sanity check (snapshot transit)
+state/vms.jsonl           # lifecycle event log; committed to git
+state/vms.schema.json     # JSONL contract (writers go through state/append.nu)
 ```
 
 `mise tasks` lists everything. See [CLAUDE.md](CLAUDE.md) for design decisions.

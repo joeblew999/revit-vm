@@ -10,4 +10,4 @@ if ($matches | is-empty) {
 let id = ($matches | first | get id)
 print $"deleting Vultr BM ($id) ($env.VULTR_LABEL)"
 ^fnox exec --if-missing ignore -- vultr-cli bare-metal delete $id
-nu state/append.nu ({action: "destroyed", label: $env.VULTR_LABEL, bm_id: $id} | to json -r)
+nu state/append.nu destroyed --label $env.VULTR_LABEL --bm-id $id

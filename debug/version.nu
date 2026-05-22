@@ -13,7 +13,7 @@ if $probe.exit_code != 0 {
 } else {
     let ip = ($probe.stdout | str trim)
     let key = ($env.SSH_KEY_FILE | str replace "~" $env.HOME)
-    let logs = (^ssh -i $key -o StrictHostKeyChecking=accept-new $"root@($ip)" 'docker logs windows_batch_processor 2>&1' | complete)
+    let logs = (^ssh -i $key -o StrictHostKeyChecking=accept-new $"root@($ip)" 'docker logs windows 2>&1' | complete)
     if $logs.exit_code == 0 {
         $logs.stdout | lines | find -r 'Windows for Docker v[0-9.]+' | first | default "  (version not detected in logs)" | print $"  ($in)"
     }

@@ -2,7 +2,11 @@
 # OOBE and the RDP service is up. Polls every 30s, 90 min max. macOS
 # notification on success or timeout.
 
-let ip = (mise run vm:ip | str trim)
+let ip = (match $env.VM_PROVIDER {
+    "hetzner" => (nu providers/hetzner/ip.nu),
+    "vultr"   => (nu providers/vultr/ip.nu),
+    _ => { print -e $"VM_PROVIDER must be hetzner|vultr \(got '($env.VM_PROVIDER)'\)"; exit 1 }
+} | str trim)
 mut elapsed = 0
 let max = 90 * 60
 print $"polling ($ip):3389 \(every 30s, max 90 min\)..."

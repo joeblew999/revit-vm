@@ -1,21 +1,12 @@
-# Root mise.toml. Holds:
+# Root mise.toml. Single task surface for the repo:
 #   - workspace tools + env vars
 #   - daily-use orchestrators (start / stop / push / pull)
 #   - provider-aware dispatchers (vm:up / vm:down / vm:ip / snapshot:*)
+#   - per-stage tasks (connect:*, debug:*, files:*, viewer:*, gui:*, ...)
 #
-# Per-stage task definitions live in their stage folder's mise.toml:
-#   connect/      → rdp:wait, rdp:open, rdp:install
-#   files/        → files:ls
-#   debug/        → debug:ssh, debug:probe, debug:logs, debug:metrics, debug:version, debug:host-disk
-#   viewer/       → viewer:open
-#   trial/        → trial:remind
-#   deps/         → deps:check
-#   providers/hetzner/ → token:set, vm:up-qemu, vm:up-kvm
-#   providers/vultr/   → vultr:* (token, setup, enumerate, up/down/status)
-#
-# All subfolder mise.toml files are loaded additively by mise and their
-# tasks are visible from anywhere in the repo. New clones need one-time
-# `mise trust` per file.
+# All tasks live here (see CLAUDE.md decision 6 — subfolder mise.toml's were
+# tried and rolled back). Task bodies that span more than a few lines live
+# in .nu files under the matching folder.
 
 [tools]
 hcloud = "1.64.1"
@@ -27,8 +18,6 @@ aws = "2.30.4"
 fnox = "1.19.0"
 # Nushell — all task bodies live in .nu files. Cross-platform binary,
 # `git clone && mise install` works on Linux servers the same as on Mac.
-# (Python tools are NOT pinned here anymore; IronPython linting lives in
-# the sibling vm-software repo where windows-runner/ now resides.)
 "aqua:nushell/nushell" = "0.112.2"
 # pitchfork — process manager for the embedded gui (gui:serve:bg keeps
 # http-nu running across shell sessions). Only needed if you use the gui.
@@ -48,10 +37,6 @@ SERVER_IMAGE = "ubuntu-24.04"
 SERVER_LOCATION = "fsn1"
 SSH_KEY = "gedw99_hetzner"
 SSH_KEY_FILE = "~/.ssh/gedw99_hetzner"
-
-# (TRIAL_STARTED / REVIT_INSTALLER_URL moved to the sibling vm-software
-# repo along with their consumer tasks — they're per-app concerns, not
-# VM-lifecycle concerns.)
 
 # Vultr-side. Set in mise.local.toml when VM_PROVIDER=vultr. Empty here so
 # this file commits cleanly; tasks error with clear pointers when missing.
@@ -79,7 +64,7 @@ REFRESH_INTERVAL_SEC = "10"
 # ╚═════════════════════════════════════════════════════════════════════════╝
 
 [tasks.start]
-description = "RESUME WORK. Provisions a VM (from latest snapshot if any, else fresh), waits for Windows to be RDP-ready, opens RDP. Hetzner: ~90s from snapshot, ~1hr fresh. Vultr: ~6 min fresh on KVM (snapshot path lights up after Phase 3 R2 bootstrap)."
+description = "RESUME WORK. Provisions a VM (from latest snapshot if any, else fresh), waits for Windows to be RDP-ready, opens RDP. Hetzner: ~90s from snapshot, ~1hr fresh. Vultr: ~6 min fresh on KVM (requires R2 bootstrap for the snapshot path)."
 run = '''
 set -e
 case "$VM_PROVIDER" in
@@ -93,8 +78,13 @@ case "$VM_PROVIDER" in
     fi
     ;;
   vultr)
-    echo "→ fresh Vultr Bare Metal provision (~6 min Windows install on KVM)"
-    mise run vm:up
+    if fnox exec --if-missing ignore -- vultr-cli snapshot list -o json 2>/dev/null | jq -e '(.snapshots // []) | map(select(.description | startswith("vm-servers-"))) | length > 0' >/dev/null; then
+      echo "→ booting from latest Vultr snapshot"
+      mise run vm:up-snap
+    else
+      echo "→ no snapshot — fresh Vultr Bare Metal provision (~6 min Windows install on KVM)"
+      mise run vm:up
+    fi
     ;;
   *) echo "VM_PROVIDER must be 'hetzner' or 'vultr' (got: '$VM_PROVIDER')" >&2; exit 1 ;;
 esac
@@ -110,7 +100,7 @@ IP=$(mise run vm:ip)
 KEY="${SSH_KEY_FILE/#~/$HOME}"
 echo "→ clean-shutting Windows (ACPI via docker stop, up to 120s)"
 ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "root@$IP" \
-  "docker stop --timeout=120 windows_batch_processor"
+  "docker stop --timeout=120 windows"
 mise run snapshot:create
 mise run snapshot:prune
 mise run vm:down
@@ -364,8 +354,6 @@ description = "Disk usage on the host VM — sees Windows qcow2 and shared folde
 run = "nu debug/host-disk.nu"
 
 # ── Windows-side setup helper ─────────────────────────────────────────────
-# (python:* lint/test tasks moved to the sibling vm-software repo with the
-# windows-runner/ IronPython operations.)
 
 [tasks.win-setup-ssh]
 description = "Run this task ON THE WINDOWS MACHINE (as Admin) to configure OpenSSH and print Mac setup commands."

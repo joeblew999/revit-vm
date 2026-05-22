@@ -34,9 +34,10 @@ runcmd:
   # Run the dockur/windows container automatically.
   # KVM=N forces QEMU/TCG software emulation — Hetzner Cloud doesn't expose
   # nested virtualization on any server tier. Expect ~5-10x slower Windows
-  # vs KVM-backed; viable for batch workloads, painful for interactive.
+  # vs KVM-backed; viable for headless / unattended workloads, painful for
+  # interactive use.
   - >
-    docker run -d --name windows_batch_processor
+    docker run -d --name windows
     -p 8006:8006
     -p 3389:3389/tcp
     -p 3389:3389/udp

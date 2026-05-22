@@ -23,4 +23,4 @@ print "Vultr BM provisioning from snapshot started (async). Next:"
 print "  mise run vm:status      # poll for active state"
 print "  mise run rdp:wait       # block until Windows RDP is up"
 
-nu state/append.nu ({action: "provisioned-from-snapshot", label: $env.VULTR_LABEL, snapshot_id: $snap.id} | to json -r)
+nu state/append.nu provisioned-from-snapshot --label $env.VULTR_LABEL --snapshot-id $snap.id

@@ -51,7 +51,7 @@ command -v aws >/dev/null 2>&1 || {
   echo "  installing awscli on the BM (one-time)..."
   apt-get update -qq && apt-get install -y -qq awscli
 }
-docker stop --timeout=120 windows_batch_processor 2>/dev/null || true
+docker stop --timeout=120 windows 2>/dev/null || true
 QCOW2=$(ls /root/windows_storage/*.qcow2 2>/dev/null | head -1)
 [ -z "$QCOW2" ] && { echo "no qcow2 found in /root/windows_storage"; exit 1; }
 SIZE=$(du -h "$QCOW2" | cut -f1)
@@ -117,7 +117,7 @@ loop {
 print "→ deleting R2 transit object (Vultr has its own copy now)..."
 ^fnox exec --if-missing ignore -- aws --endpoint-url $env.R2_ENDPOINT s3 rm $"s3://($env.R2_BUCKET)/($s3_key)" --quiet
 
-nu state/append.nu ({action: "snapshotted", label: $env.VULTR_LABEL, snapshot_id: $snap_id, description: $desc} | to json -r)
+nu state/append.nu snapshotted --label $env.VULTR_LABEL --description $desc --snapshot-id $snap_id
 
 print ""
 print $"snapshot created: ($snap_id) — `mise run snapshot:list` to see it."

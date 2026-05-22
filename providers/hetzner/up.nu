@@ -12,4 +12,4 @@ if $probe.exit_code == 0 {
 
 # Record the provisioning event.
 let provisioned_ip = (^fnox exec --if-missing ignore -- hcloud server ip $env.SERVER_NAME | str trim)
-nu state/append.nu ({action: "provisioned", flavor: "qemu", label: $env.SERVER_NAME, ip: $provisioned_ip} | to json -r)
+nu state/append.nu provisioned --label $env.SERVER_NAME --flavor qemu --ip $provisioned_ip

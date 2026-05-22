@@ -7,9 +7,9 @@
 :: this point. So a fresh provision lands you on a fully-configured VM
 :: with zero RDP click-through.
 ::
-:: Generic Windows-host setup only. Per-app installs (Revit, etc.) live
-:: in the sibling vm-software repo — that gets git-cloned INSIDE the VM
-:: after first boot and drives installs from there.
+:: Generic Windows-host setup only. Per-app installs live in the sibling
+:: vm-software repo — that gets git-cloned INSIDE the VM after first boot
+:: and drives installs from there.
 ::
 :: Log everything (see C:\OEM\install.log inside the VM, or
 :: \\host.lan\Data\install.log via Z: from the host).
@@ -24,12 +24,12 @@ net use Z: \\host.lan\Data /persistent:yes >> "%LOG%" 2>&1
 
 :: 2. Windows Defender exclusions on hot paths. Real-time scanning of the
 ::    shared folder would kill TCG-already-slow throughput. Generic paths
-::    only — per-app folders (e.g. C:\Program Files\Revit Batch Processor)
-::    can be added by the relevant vm-software install task.
+::    only — per-app folders can be added by the relevant vm-software
+::    install task.
 echo Adding Defender exclusions >> "%LOG%"
 powershell -NoProfile -Command "Add-MpPreference -ExclusionPath 'Z:\jobs','Z:\output','Z:\installers'" >> "%LOG%" 2>&1
 
-:: 3. Don't sleep, don't hibernate, don't blank the screen. A batch VM
+:: 3. Don't sleep, don't hibernate, don't blank the screen. A remote VM
 ::    should stay responsive 24x7.
 echo Disabling sleep / standby / monitor blank >> "%LOG%"
 powercfg /change standby-timeout-ac 0 >> "%LOG%" 2>&1

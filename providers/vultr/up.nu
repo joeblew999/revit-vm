@@ -19,4 +19,4 @@ print "  mise run rdp:wait       # block until Windows RDP is up"
 
 # IP isn't assigned for a few minutes; record what we know now and let
 # `vm:status` / `vm:ip` reflect the eventual IP.
-nu state/append.nu ({action: "provisioned", flavor: "kvm", label: $env.VULTR_LABEL, region: $env.VULTR_REGION, plan: $env.VULTR_PLAN} | to json -r)
+nu state/append.nu provisioned --label $env.VULTR_LABEL --flavor kvm --region $env.VULTR_REGION --plan $env.VULTR_PLAN

@@ -1,16 +1,97 @@
-# Append a single VM lifecycle event to state/vms.jsonl. Called from
-# other scripts via `nu state/append.nu '{"action": "...", ...}'`.
+# Typed writers for VM lifecycle events in state/vms.jsonl.
 #
-# Each line is one JSON record. The `ts` and `provider` fields are filled
-# in automatically — caller supplies the action-specific fields.
+# JSONL has no header concept — each line stands alone. The contract for
+# what fields go where lives in state/vms.schema.json and is *enforced* here
+# by nushell's typed flags on each `main <event>` subcommand. Missing or
+# wrong-typed fields fail at parse time, not silently in production.
 #
-# `git push` after this is the persistence story (sibling vm-gui reads
-# the latest state via `git pull`).
+# Callers invoke as a subprocess (matches the rest of the repo's pattern):
+#
+#   nu state/append.nu provisioned --label foo --flavor qemu --ip 1.2.3.4
+#   nu state/append.nu provisioned-from-snapshot --label foo --snapshot-id 99 --ip 1.2.3.4
+#   nu state/append.nu snapshotted --label foo --description foo-20260522 --snapshot-id 12345
+#   nu state/append.nu destroyed --label foo
+#
+# Auto-filled fields: ts (ISO 8601 with offset), provider ($VM_PROVIDER).
+# Persistence is git: `git add state/vms.jsonl && git push` after lifecycle ops.
 
-def main [event_json: string] {
-    let event = ($event_json | from json)
+def now_ts [] {
+    date now | format date "%Y-%m-%dT%H:%M:%S%z"
+}
+
+def write_event [event: record] {
     let enriched = ($event
-        | upsert ts (date now | format date "%Y-%m-%dT%H:%M:%S%z")
+        | upsert ts (now_ts)
         | upsert provider $env.VM_PROVIDER)
-    $enriched | to json -r | save -a state/vms.jsonl
+    # JSONL requires a newline between records — `save -a` does not add one.
+    let line = ($enriched | to json -r)
+    $"($line)\n" | save -a state/vms.jsonl
+}
+
+def "main provisioned" [
+    --label: string,                 # VM identity (SERVER_NAME / VULTR_LABEL)
+    --flavor: string,                # "qemu" | "kvm"
+    --ip: string = "",               # public IPv4 if known (Vultr is async, may be empty)
+    --region: string = "",           # Vultr only
+    --plan: string = "",             # Vultr only
+] {
+    if ($label | is-empty)  { print -e "--label required";  exit 2 }
+    if ($flavor | is-empty) { print -e "--flavor required"; exit 2 }
+    if $flavor not-in ["qemu", "kvm"] { print -e $"--flavor must be qemu|kvm \(got ($flavor)\)"; exit 2 }
+
+    mut e = {action: "provisioned", label: $label, flavor: $flavor}
+    if ($ip | is-not-empty)     { $e = ($e | upsert ip $ip) }
+    if ($region | is-not-empty) { $e = ($e | upsert region $region) }
+    if ($plan | is-not-empty)   { $e = ($e | upsert plan $plan) }
+    write_event $e
+}
+
+def "main provisioned-from-snapshot" [
+    --label: string,
+    --snapshot-id: string,
+    --ip: string = "",
+] {
+    if ($label | is-empty)       { print -e "--label required";       exit 2 }
+    if ($snapshot_id | is-empty) { print -e "--snapshot-id required"; exit 2 }
+
+    mut e = {action: "provisioned-from-snapshot", label: $label, snapshot_id: $snapshot_id}
+    if ($ip | is-not-empty) { $e = ($e | upsert ip $ip) }
+    write_event $e
+}
+
+def "main snapshotted" [
+    --label: string,
+    --description: string,
+    --snapshot-id: string = "",      # Hetzner doesn't always capture; Vultr always does
+] {
+    if ($label | is-empty)       { print -e "--label required";       exit 2 }
+    if ($description | is-empty) { print -e "--description required"; exit 2 }
+
+    mut e = {action: "snapshotted", label: $label, description: $description}
+    if ($snapshot_id | is-not-empty) { $e = ($e | upsert snapshot_id $snapshot_id) }
+    write_event $e
+}
+
+def "main destroyed" [
+    --label: string,
+    --bm-id: string = "",            # Vultr only
+] {
+    if ($label | is-empty) { print -e "--label required"; exit 2 }
+
+    mut e = {action: "destroyed", label: $label}
+    if ($bm_id | is-not-empty) { $e = ($e | upsert bm_id $bm_id) }
+    write_event $e
+}
+
+def main [] {
+    print "Usage: nu state/append.nu <event> [flags]"
+    print ""
+    print "Events:"
+    print "  provisioned                 fresh VM created"
+    print "  provisioned-from-snapshot   VM restored from snapshot"
+    print "  snapshotted                 snapshot taken"
+    print "  destroyed                   VM deleted"
+    print ""
+    print "Contract: state/vms.schema.json"
+    exit 2
 }

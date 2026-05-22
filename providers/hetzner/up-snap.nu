@@ -19,4 +19,4 @@ if $probe.exit_code == 0 {
 }
 
 let provisioned_ip = (^fnox exec --if-missing ignore -- hcloud server ip $env.SERVER_NAME | str trim)
-nu state/append.nu ({action: "provisioned-from-snapshot", label: $env.SERVER_NAME, ip: $provisioned_ip, snapshot_id: ($snap.id | into string)} | to json -r)
+nu state/append.nu provisioned-from-snapshot --label $env.SERVER_NAME --snapshot-id ($snap.id | into string) --ip $provisioned_ip
