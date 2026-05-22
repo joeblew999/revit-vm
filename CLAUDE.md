@@ -39,11 +39,14 @@ Daily UX is four commands: `start`, `stop`, `push`, `pull`. Everything else is g
 16. **Datastar v1 needs SSE-shaped responses for `@get`/`@post`, not plain HTML.** Returning raw `<pre>...</pre>` from a handler reaches the browser but never merges into the DOM (click → silent no-op). Wrap responses via `datastar-patch` (gui/server/serve.nu) which formats as `event: datastar-patch-elements` + `data: elements <html>` SSE. ID-based merge happens automatically. http-nu's body is `$in` at closure top — capture before any `let`/`match` shadows it; `"" | from json` errors *outside* try/catch so guard with `str trim | is-empty` first.
 
 17. **AI drives the API, not the browser. No Playwright needed.** The gui carries no business logic — every button is a thin POST/GET to a mise task, and every render is a function over `state/vms.jsonl` + provider APIs. Two surfaces (browser DOM, AI/HTTP client) compose through the same endpoints, so an AI or test harness gets the same outcomes by calling them directly:
-    - **Drive**: `curl -X POST http://127.0.0.1:8080/api/vm/start -d '{"label":"vm-x","provider":"hetzner"}'` is the Start button.
+    - **Drive (form input)**: `curl -X POST /api/vm/start -d '{"label":"vm-x","provider":"hetzner"}'` is the Start button with the form filled.
+    - **Drive (per-row)**: `curl -X POST '/api/vm/stop?label=vm-x&provider=hetzner'` is the per-row Stop button. Query string takes precedence over signals body so per-VM buttons target THAT VM.
     - **Observe (durable)**: `state/vms.jsonl` is the source of truth, queryable any time. `/api/state` and `/api/runs` return it as JSON.
     - **Observe (live)**: `xs cat --follow --sse -T vm.lifecycle $XS_ADDR` streams every event the moment a writer (lifecycle script, MCP, gui POST) emits it.
     - **Confirm**: `/api/vm/status` + `/api/snapshots` hit the provider API directly for ground truth.
     Skipping the browser layer means no headless renderer overhead, no flake from rendering, and AI development loops at the speed of HTTP. The reactive gui you see in a browser is just one of many subscribers to the same streams.
+
+18. **Label / provider propagation through the dispatcher.** `lifecycle/dispatch.nu` takes `--label` / `--provider` flags that mutate `$env.SERVER_NAME` (Hetzner) or `$env.VULTR_LABEL` (Vultr) AND `$env.VM_PROVIDER` before invoking the per-provider script. CLI args bypass mise's `[env]` re-injection (which would clobber bash-prefix env overrides — bit us twice in CI and gui this session). `lifecycle/start.nu` + `lifecycle/stop.nu` accept the same flags and propagate. Net effect: a single labeled invocation works the same from CLI, gui per-row button, or AI. `mise run vm:down -- --label vm-b` and `POST /api/vm/stop?label=vm-b` produce identical lifecycle events.
 
 ## Don't
 
