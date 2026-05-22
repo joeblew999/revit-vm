@@ -237,16 +237,23 @@ def render-status-board [] {
     </div>
   </section>
 
-  <section>
+  <section data-signals=\"{label: '', provider: '($provider)'}\">
     <h2>Actions</h2>
-    <p><small>Each button POSTs to a mise task that runs as a pitchfork-supervised daemon. See the Jobs section below for live status, or run <code>pitchfork list</code> / <code>pitchfork logs &lt;name&gt;</code> from the CLI.</small></p>
+    <p><small>Each action POSTs to a mise task that runs as a pitchfork-supervised daemon. See the Jobs section below for live status. Multi-VM: type a unique <kbd>label</kbd> + pick a provider, then Start to provision a new one alongside any existing.</small></p>
+    <fieldset role=\"group\">
+      <input name=\"label\" data-bind=\"label\" placeholder=\"vm label — blank uses default\">
+      <select name=\"provider\" data-bind=\"provider\">
+        <option value=\"hetzner\">hetzner</option>
+        <option value=\"vultr\">vultr</option>
+      </select>
+    </fieldset>
     <div role=\"group\">
       <button data-on-click=\"@post\(`/api/vm/start`\)\">Start</button>
       <button data-on-click=\"@post\(`/api/vm/stop`\)\" class=\"secondary\">Stop</button>
       <button data-on-click=\"@post\(`/api/snapshot/create`\)\" class=\"secondary\">Snapshot</button>
       <button data-on-click=\"@get\(`/api/vm/status`\)\" class=\"contrast\">Refresh status</button>
     </div>
-    <pre id=\"action-output\"><code>Click a button to act on the active provider's VM.</code></pre>
+    <pre id=\"action-output\"><code>Type a label + click Start to provision a new VM. Leave blank to act on the default VM from mise.toml.</code></pre>
   </section>
 
   <section>
@@ -293,19 +300,54 @@ def render-status-board [] {
 # via `pitchfork list`, `pitchfork stop NAME`, `pitchfork logs NAME` —
 # OR via the Jobs section in this gui, which calls `pitchfork list`.
 #
-# Each invocation gets a unique daemon name (vm-action-<task>-<ts>) so
-# two concurrent Starts don't collide.
-def fire-and-forget [mise_task: string] {
+# Each invocation gets a unique daemon name (vm-action-<task>-<ts>-<label>)
+# so concurrent actions across multiple VMs don't collide.
+#
+# env_vars: optional record of overrides (e.g. {SERVER_NAME: "vm-b"})
+# wrapped via bash so they actually reach the mise child process.
+def fire-and-forget [mise_task: string, env_vars: record = {}] {
     let safe = ($mise_task | str replace --all ":" "-")
     let stamp = (date now | format date "%H%M%S")
-    let name = $"vm-action-($safe)-($stamp)"
-    # pitchfork run is detached itself; the inner `mise run ...` inherits
-    # the pitchfork-supervised lifetime + logs.
-    ^pitchfork run $name -f -- mise run $mise_task
+    let label_tag = ($env_vars.SERVER_NAME? | default ($env_vars.VULTR_LABEL? | default ""))
+    let name = (if ($label_tag | is-empty) {
+        $"vm-action-($safe)-($stamp)"
+    } else {
+        $"vm-action-($safe)-($label_tag)-($stamp)"
+    })
+    if ($env_vars | columns | is-empty) {
+        ^pitchfork run $name -f -- mise run $mise_task
+    } else {
+        let prefix = ($env_vars | columns | each {|k|
+            let v = ($env_vars | get $k)
+            $"($k)='($v)'"
+        } | str join " ")
+        ^pitchfork run $name -f -- bash -c $"($prefix) mise run ($mise_task)"
+    }
     $name
 }
 
+# Build env-override record for a labeled VM start. Per-provider knows
+# which env var carries the label (SERVER_NAME on Hetzner, VULTR_LABEL on
+# Vultr). Returns {} when no label provided — caller falls back to defaults.
+# Input is a record (e.g. parsed from Datastar's JSON POST body).
+def vm-env-from-form [form: record] {
+    let label = ($form.label? | default "" | str trim)
+    if ($label | is-empty) { return {} }
+    let provider = ($form.provider? | default $env.VM_PROVIDER)
+    mut e = {VM_PROVIDER: $provider}
+    if $provider == "hetzner" {
+        $e = ($e | upsert SERVER_NAME $label)
+    } else if $provider == "vultr" {
+        $e = ($e | upsert VULTR_LABEL $label)
+    }
+    $e
+}
+
 {|req|
+    # Capture body NOW — $in is the body stream at closure top, but later
+    # statements (`let`, `match`) shadow it. http-nu errors "channel closed"
+    # if you read $in for a request with no body, so wrap in try.
+    let body = (try { $in | default "" } catch { "" })
     let path = ($req.path | default "/")
     let method = ($req.method | default "GET")
 
@@ -324,8 +366,23 @@ def fire-and-forget [mise_task: string] {
             $"<pre id=\"action-output\"><code>(html-esc $body)</code></pre>"
         }
         ["POST", "/api/vm/start"]     => {
-            let name = (fire-and-forget "start")
-            $"<pre id=\"action-output\"><code>start queued as pitchfork daemon <kbd>($name)</kbd>\nVMs table above will show events; see Jobs section for live status\n`pitchfork logs ($name)` to tail</code></pre>"
+            # Body is Datastar-posted JSON like {"label":"vm-b","provider":"hetzner"};
+            # empty body → start the default VM. Guard `from json` because an
+            # empty-string JSON parse errors *outside* the try (likely from
+            # the streaming parser before try sees it).
+            let form = (if (($body | str trim) | is-empty) {
+                {}
+            } else {
+                try { $body | from json } catch { {} }
+            })
+            let env_overrides = (vm-env-from-form $form)
+            let name = (fire-and-forget "start" $env_overrides)
+            let label_msg = (if ($form.label? | default "" | is-empty) {
+                "default VM"
+            } else {
+                $"VM <kbd>($form.label)</kbd> on <kbd>($form.provider? | default $env.VM_PROVIDER)</kbd>"
+            })
+            $"<pre id=\"action-output\"><code>start queued for ($label_msg)\npitchfork daemon: <kbd>($name)</kbd>\n`pitchfork logs ($name)` to tail</code></pre>"
         }
         ["POST", "/api/vm/stop"]      => {
             let name = (fire-and-forget "stop")
