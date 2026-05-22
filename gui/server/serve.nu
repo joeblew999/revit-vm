@@ -84,10 +84,43 @@ def vms-fragment-render [] {
 </figure>"
 }
 
+# Live provider snapshots — one shell-out per page load (NOT polled, to
+# avoid hammering the provider's rate limit every 5s).
+def snapshots-render [] {
+    let provider = ($env.VM_PROVIDER? | default "")
+    let script = $"providers/($provider)/snapshot-list.nu"
+    if not ($script | path exists) {
+        return $"<aside><em>no snapshot-list for provider <kbd>(html-esc $provider)</kbd></em></aside>"
+    }
+    let out = (^nu $script --json | complete)
+    if $out.exit_code != 0 {
+        return $"<aside><em>snapshot:list failed: <code>(html-esc $out.stderr)</code></em></aside>"
+    }
+    let snaps = (try { $out.stdout | from json } catch { [] })
+    if ($snaps | is-empty) {
+        return $"<aside><em>no snapshots yet \(provider: <kbd>(html-esc $provider)</kbd>\)</em></aside>"
+    }
+    let rows = ($snaps | each {|s|
+        let id = (html-esc ($s.id? | default '-'))
+        let desc = (html-esc ($s.description? | default '-'))
+        let sz = ($s.image_size_gb? | default ($s.size_gb? | default '-'))
+        let created = (html-esc ($s.created? | default '-'))
+        $"<tr><td><code>($id)</code></td><td>($desc)</td><td>($sz) GB</td><td>($created)</td></tr>"
+    } | str join "\n")
+    $"<figure><table>
+  <thead><tr><th scope=\"col\">id</th><th scope=\"col\">description</th><th scope=\"col\">size</th><th scope=\"col\">created</th></tr></thead>
+  <tbody>
+($rows)
+  </tbody>
+</table></figure>"
+}
+
 def render-status-board [] {
     let state = (aggregate_state)
     let installs_repo = (html-esc ($env.VM_SOFTWARE_REPO? | default '<unset>'))
+    let provider = (html-esc ($env.VM_PROVIDER? | default '<unset>'))
     let fragment = (vms-fragment-render)
+    let snapshots = (snapshots-render)
     let poll_attrs = (if (reactive) {
         $"data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/vms-fragment`\)\""
     } else { "" })
@@ -96,15 +129,20 @@ def render-status-board [] {
   <header>
     <hgroup>
       <h1>vm-servers</h1>
-      <p>Status board. VMs from <code>state/vms.jsonl</code>; installs from <code>($installs_repo)/state/installs.jsonl</code>.</p>
+      <p>Status board. Active provider: <kbd>($provider)</kbd>. VMs from <code>state/vms.jsonl</code>; installs from <code>($installs_repo)/state/installs.jsonl</code>; snapshots live from provider API.</p>
     </hgroup>
   </header>
 
   <section>
-    <h2>VMs</h2>
+    <h2>VMs <small>— auto-refresh every ($POLL_MS / 1000)s</small></h2>
     <div id=\"vms-fragment\" ($poll_attrs)>
 ($fragment)
     </div>
+  </section>
+
+  <section>
+    <h2>Snapshots <small>— loaded on page load; refresh for fresh</small></h2>
+($snapshots)
   </section>
 
   <section>
@@ -128,6 +166,16 @@ def render-status-board [] {
             ^nu state/runs.nu --json
         }
         ["GET", "/api/vms-fragment"]  => { vms-fragment-render }
+        ["GET", "/api/snapshots"]     => {
+            # Live provider snapshot list (Hetzner or Vultr depending on $VM_PROVIDER).
+            let provider = ($env.VM_PROVIDER? | default "")
+            let script = $"providers/($provider)/snapshot-list.nu"
+            if not ($script | path exists) {
+                $"{\"error\":\"no snapshot-list for provider ($provider)\"}"
+            } else {
+                ^nu $script --json
+            }
+        }
         ["GET", "/api/events"]        => {
             # Live SSE stream of vm.lifecycle events from xs. Bridges the MCP
             # actor (writes) and the GUI actor (reads) without polling.
