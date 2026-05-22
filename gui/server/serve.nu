@@ -122,6 +122,22 @@ def runs-render [] {
 </table></figure>"
 }
 
+# Recent server errors — tail of `pitchfork logs gui` filtered for
+# ERROR / Script error / panic / FAIL lines. Helps surface watch-reload
+# crashes from within the gui itself. Polled like the other fragments.
+def gui-errors-render [] {
+    let out = (^pitchfork logs gui -n 300 | complete)
+    if $out.exit_code != 0 {
+        return "<pre id=\"gui-errors\"><code>pitchfork logs unavailable — run `mise run gui:logs` from terminal</code></pre>"
+    }
+    let lines = ($out.stdout | lines | where {|l| $l =~ 'ERROR|Script error|panic|FAIL|Command .* not found' } | last 15)
+    if ($lines | is-empty) {
+        return "<pre id=\"gui-errors\"><code>— no errors in the last 300 log lines —</code></pre>"
+    }
+    let body_lines = ($lines | each {|l| html-esc $l } | str join "\n")
+    $"<pre id=\"gui-errors\" style=\"max-height: 240px; overflow: auto;\"><code>($body_lines)</code></pre>"
+}
+
 # Live events feed: tail of vms.jsonl rendered chronologically. Polled
 # from the gui every POLL_MS so new lifecycle events appear without
 # refreshing. (Same data the xs broadcast layer carries — we use the
@@ -278,6 +294,14 @@ def render-status-board [] {
     <h2>Recent installs</h2>
     <pre><code>(html-esc ($state.installs_recent | to json --indent 2))</code></pre>
   </section>
+
+  <section>
+    <h2>Server log <small>— last 15 errors from <code>pitchfork logs gui</code>, polled every ($POLL_MS / 1000)s</small></h2>
+    <div data-on-load=\"@get\(`/api/gui-errors`\)\" data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/gui-errors`\)\">
+      <pre id=\"gui-errors\"><code>loading ...</code></pre>
+    </div>
+    <p><small>Surfaces watch-reload crashes here so you don't need to drop to a terminal. For full follow: <code>mise run gui:logs</code>.</small></p>
+  </section>
 </main>"
 
     shell "vm-servers" $body
@@ -391,6 +415,7 @@ def vm-env-from-form [form: record] {
             datastar-patch $html
         }
         ["GET", "/api/events-feed"]   => { datastar-patch (events-feed-render) }
+        ["GET", "/api/gui-errors"]    => { datastar-patch (gui-errors-render) }
         ["GET", "/api/vms-fragment"]  => { datastar-patch (vms-fragment-render) }
         ["GET", "/api/snapshots"]     => {
             # Live provider snapshot list (Hetzner or Vultr depending on $VM_PROVIDER).
