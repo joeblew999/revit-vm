@@ -1,0 +1,2 @@
+{"action":"provisioned-from-snapshot","label":"windows-vm","snapshot_id":"388127607","ip":"178.105.195.47","ts":"2026-05-22T14:49:59+0700","provider":"hetzner"}
+{"action":"destroyed","label":"windows-vm","ts":"2026-05-22T14:55:40+0700","provider":"hetzner"}

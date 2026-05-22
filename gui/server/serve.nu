@@ -65,6 +65,52 @@ def vm-row-render [v: record, installs_recent: list] {
     $"<tr><td>($label)</td><td>($provider)</td><td>($action)</td><td><code>($ip)</code></td><td>($installs_for_vm)</td></tr>"
 }
 
+# Runs view: derived from vms.jsonl by state/runs.nu. One row per
+# provisioned→destroyed pair with duration_hr.
+def runs-render [] {
+    let out = (^nu state/runs.nu --json | complete)
+    if $out.exit_code != 0 or ($out.stdout | str trim | is-empty) {
+        return "<aside><em>no runs yet — start a VM and stop it to see one</em></aside>"
+    }
+    let runs = ($out.stdout | lines | where ($it | str trim | is-not-empty) | each {|l| $l | from json })
+    let rows = ($runs | each {|r|
+        let label = (html-esc ($r.label? | default '-'))
+        let prov = (html-esc ($r.provider? | default '-'))
+        let started = (html-esc ($r.started_at? | default '-'))
+        let stopped = (html-esc ($r.stopped_at? | default 'still running'))
+        let dur = ($r.duration_hr? | default '-')
+        let sku = (html-esc ($r.sku? | default '-'))
+        $"<tr><td>($label)</td><td>($prov)</td><td>($started)</td><td>($stopped)</td><td>($dur)</td><td>($sku)</td></tr>"
+    } | str join "\n")
+    $"<figure><table>
+  <thead><tr><th scope=\"col\">label</th><th scope=\"col\">provider</th><th scope=\"col\">started</th><th scope=\"col\">stopped</th><th scope=\"col\">hours</th><th scope=\"col\">sku</th></tr></thead>
+  <tbody>
+($rows)
+  </tbody>
+</table></figure>"
+}
+
+# Costs reference: provider/SKU pricing from state/costs.jsonl. Static —
+# loaded on page render, not polled.
+def costs-render [] {
+    let path = "state/costs.jsonl"
+    if not ($path | path exists) { return "<aside><em>state/costs.jsonl missing</em></aside>" }
+    let rows = (open $path | lines | where ($it | str trim | is-not-empty) | each {|l| $l | from json })
+    let trs = ($rows | each {|r|
+        let cat = (html-esc ($r.category? | default '-'))
+        let prov = (html-esc ($r.provider? | default '-'))
+        let sku = (html-esc ($r.sku? | default ($r.name? | default '-')))
+        let note = (html-esc ($r.notes? | default ($r.note? | default '-')))
+        $"<tr><td>($cat)</td><td>($prov)</td><td><kbd>($sku)</kbd></td><td><small>($note)</small></td></tr>"
+    } | str join "\n")
+    $"<figure><table>
+  <thead><tr><th scope=\"col\">category</th><th scope=\"col\">provider</th><th scope=\"col\">sku / name</th><th scope=\"col\">notes</th></tr></thead>
+  <tbody>
+($trs)
+  </tbody>
+</table></figure>"
+}
+
 # The polled fragment: just the VMs table. Datastar re-fetches this every
 # POLL_MS and swaps it into the #vms-fragment div in the shell.
 def vms-fragment-render [] {
@@ -121,6 +167,9 @@ def render-status-board [] {
     let provider = (html-esc ($env.VM_PROVIDER? | default '<unset>'))
     let fragment = (vms-fragment-render)
     let snapshots = (snapshots-render)
+    let runs = (runs-render)
+    let costs = (costs-render)
+    let xs_addr = (html-esc ($env.XS_ADDR? | default '<unset>'))
     let poll_attrs = (if (reactive) {
         $"data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/vms-fragment`\)\""
     } else { "" })
@@ -155,6 +204,23 @@ def render-status-board [] {
   <section>
     <h2>Snapshots <small>— loaded on page load; refresh for fresh</small></h2>
 ($snapshots)
+  </section>
+
+  <section>
+    <h2>Runs <small>— derived from vms.jsonl by state/runs.nu</small></h2>
+($runs)
+  </section>
+
+  <section>
+    <h2>Costs <small>— provider/SKU pricing reference</small></h2>
+($costs)
+  </section>
+
+  <section>
+    <h2>Live events <small>— xs event bus</small></h2>
+    <p>The lifecycle scripts publish every <code>vm.lifecycle</code> event to xs at <kbd>($xs_addr)</kbd>. Today the VMs table above polls the JSONL view; to tail xs directly:</p>
+    <pre><code>mise x -- xs cat --follow --sse --topic vm.lifecycle ($xs_addr)</code></pre>
+    <p><small>v1 todo: wire Datastar SSE merge to make this section live in-browser.</small></p>
   </section>
 
   <section>

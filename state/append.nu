@@ -28,8 +28,13 @@ def write_event [event: record] {
     $"($line)\n" | save -a state/vms.jsonl
     # Publish to xs when the store is running — powers the GUI SSE stream and
     # lets MCP clients tail live lifecycle events without polling the JSONL file.
+    # Degrade silently if xs isn't reachable — the jsonl write above is the
+    # source of truth; xs is the live-broadcast convenience layer.
     if ($env.XS_ADDR? | is-not-empty) {
-        $line | ^xs append $env.XS_ADDR vm.lifecycle
+        let r = ($line | ^xs append $env.XS_ADDR vm.lifecycle | complete)
+        if $r.exit_code != 0 {
+            print -e $"\(xs unreachable at ($env.XS_ADDR) — event appended to jsonl only\)"
+        }
     }
 }
 

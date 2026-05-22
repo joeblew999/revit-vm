@@ -67,4 +67,4 @@ ci/                         # syntax / schema / dispatch checks (same as GH Acti
 state/                      # vms.jsonl + vms.schema.json + runs.nu view + costs.jsonl
 ```
 
-See [CLAUDE.md](CLAUDE.md) for design decisions and [ROADMAP.md](ROADMAP.md) for what's coming.
+See [CLAUDE.md](CLAUDE.md) for design decisions (including the v1 writes / v2 auth / xs+iroh phases).
