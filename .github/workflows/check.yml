@@ -60,10 +60,15 @@ jobs:
         shell: bash
         run: |
           set -e
-          if VM_PROVIDER=garbage mise x -- nu lifecycle/dispatch.nu up 2>&1 | grep -q "VM_PROVIDER must be"; then
+          # `env VAR=val cmd` overrides past mise's [env] injection — without
+          # it, `VM_PROVIDER=garbage` in front of `mise x` gets reset to
+          # mise.toml's default ("hetzner") before nu sees it.
+          out=$(mise x -- env VM_PROVIDER=garbage nu lifecycle/dispatch.nu up 2>&1 || true)
+          if echo "$out" | grep -q "VM_PROVIDER must be"; then
             echo "ok: dispatcher rejects bad provider"
           else
             echo "FAIL: dispatcher did not reject bad provider"
+            echo "got: $out"
             exit 1
           fi
 
@@ -71,9 +76,11 @@ jobs:
         shell: bash
         run: |
           set -e
-          if VM_PROVIDER=hetzner mise x -- nu lifecycle/dispatch.nu nonexistent-action 2>&1 | grep -q "no such action"; then
+          out=$(mise x -- env VM_PROVIDER=hetzner nu lifecycle/dispatch.nu nonexistent-action 2>&1 || true)
+          if echo "$out" | grep -q "no such action"; then
             echo "ok: dispatcher rejects missing action"
           else
             echo "FAIL: dispatcher did not reject missing action"
+            echo "got: $out"
             exit 1
           fi
