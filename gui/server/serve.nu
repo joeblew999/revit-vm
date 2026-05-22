@@ -65,25 +65,73 @@ def vm-row-render [v: record, installs_recent: list] {
     $"<tr><td>($label)</td><td>($provider)</td><td>($action)</td><td><code>($ip)</code></td><td>($installs_for_vm)</td></tr>"
 }
 
+# Build a {sku → eur_per_hour} lookup from state/costs.jsonl, so the
+# Runs section can show per-run spend (duration_hr × rate). One file read,
+# returns a record indexed by sku.
+def cost-rates [] {
+    let path = "state/costs.jsonl"
+    if not ($path | path exists) { return {} }
+    let rows = (open $path | lines | where ($it | str trim | is-not-empty) | each {|l| $l | from json } | where category == "compute")
+    mut idx = {}
+    for r in $rows {
+        let sku = ($r.sku? | default "")
+        let rate = ($r.eur_per_hour? | default 0)
+        if ($sku | is-not-empty) and ($rate > 0) {
+            $idx = ($idx | upsert $sku $rate)
+        }
+    }
+    $idx
+}
+
 # Runs view: derived from vms.jsonl by state/runs.nu. One row per
-# provisioned→destroyed pair with duration_hr.
+# provisioned→destroyed pair with duration_hr × eur/hr cost.
 def runs-render [] {
     let out = (^nu state/runs.nu --json | complete)
     if $out.exit_code != 0 or ($out.stdout | str trim | is-empty) {
         return "<aside><em>no runs yet — start a VM and stop it to see one</em></aside>"
     }
     let runs = ($out.stdout | lines | where ($it | str trim | is-not-empty) | each {|l| $l | from json })
+    let rates = (cost-rates)
     let rows = ($runs | each {|r|
         let label = (html-esc ($r.label? | default '-'))
         let prov = (html-esc ($r.provider? | default '-'))
         let started = (html-esc ($r.started_at? | default '-'))
         let stopped = (html-esc ($r.stopped_at? | default 'still running'))
-        let dur = ($r.duration_hr? | default '-')
-        let sku = (html-esc ($r.sku? | default '-'))
-        $"<tr><td>($label)</td><td>($prov)</td><td>($started)</td><td>($stopped)</td><td>($dur)</td><td>($sku)</td></tr>"
+        let dur = ($r.duration_hr? | default 0)
+        let sku = ($r.sku? | default '')
+        let rate = ($rates | get -o $sku | default 0)
+        let cost = (if $rate > 0 and $dur > 0 { ($dur * $rate | math round --precision 4) } else { '-' })
+        let sku_html = (html-esc $sku)
+        $"<tr><td>($label)</td><td>($prov)</td><td>($started)</td><td>($stopped)</td><td>($dur)</td><td><kbd>($sku_html)</kbd></td><td>€($cost)</td></tr>"
     } | str join "\n")
     $"<figure><table>
-  <thead><tr><th scope=\"col\">label</th><th scope=\"col\">provider</th><th scope=\"col\">started</th><th scope=\"col\">stopped</th><th scope=\"col\">hours</th><th scope=\"col\">sku</th></tr></thead>
+  <thead><tr><th scope=\"col\">label</th><th scope=\"col\">provider</th><th scope=\"col\">started</th><th scope=\"col\">stopped</th><th scope=\"col\">hours</th><th scope=\"col\">sku</th><th scope=\"col\">cost</th></tr></thead>
+  <tbody>
+($rows)
+  </tbody>
+</table></figure>"
+}
+
+# Live events feed: tail of vms.jsonl rendered chronologically. Polled
+# from the gui every POLL_MS so new lifecycle events appear without
+# refreshing. (Same data the xs broadcast layer carries — we use the
+# jsonl source-of-truth here to avoid the xs N+1 cas lookups.)
+def events-feed-render [] {
+    let path = "state/vms.jsonl"
+    if not ($path | path exists) or ((open $path | str trim) | is-empty) {
+        return "<pre id=\"events-feed\"><code>(no events yet — start a VM)</code></pre>"
+    }
+    let events = (open $path | lines | where ($it | str trim | is-not-empty) | each {|l| $l | from json } | last 30 | reverse)
+    let rows = ($events | each {|e|
+        let ts = (html-esc ($e.ts? | default '-'))
+        let action = (html-esc ($e.action? | default '-'))
+        let label = (html-esc ($e.label? | default '-'))
+        let prov = (html-esc ($e.provider? | default '-'))
+        let extra = (html-esc ($e | reject ts action label provider | to json -r))
+        $"  <tr><td><small>($ts)</small></td><td><kbd>($prov)</kbd></td><td>($label)</td><td><strong>($action)</strong></td><td><small><code>($extra)</code></small></td></tr>"
+    } | str join "\n")
+    $"<figure id=\"events-feed\"><table>
+  <thead><tr><th scope=\"col\">when</th><th scope=\"col\">provider</th><th scope=\"col\">label</th><th scope=\"col\">action</th><th scope=\"col\">details</th></tr></thead>
   <tbody>
 ($rows)
   </tbody>
@@ -224,10 +272,11 @@ def render-status-board [] {
   </section>
 
   <section>
-    <h2>Live events <small>— xs event bus</small></h2>
-    <p>The lifecycle scripts publish every <code>vm.lifecycle</code> event to xs at <kbd>($xs_addr)</kbd>. Today the VMs table above polls the JSONL view; to tail xs directly:</p>
-    <pre><code>mise x -- xs cat --follow --sse --topic vm.lifecycle ($xs_addr)</code></pre>
-    <p><small>v1 todo: wire Datastar SSE merge to make this section live in-browser.</small></p>
+    <h2>Live events <small>— last 30 lifecycle events, polled every ($POLL_MS / 1000)s</small></h2>
+    <div data-on-load=\"@get\(`/api/events-feed`\)\" data-on-interval__duration.($POLL_MS)ms=\"@get\(`/api/events-feed`\)\">
+      <pre id=\"events-feed\"><code>loading ...</code></pre>
+    </div>
+    <p><small>Source: <code>state/vms.jsonl</code> — the on-disk truth. xs at <kbd>($xs_addr)</kbd> carries the same stream for live consumers like MCP. Tail xs directly: <code>mise x -- xs cat --follow --sse -T vm.lifecycle ($xs_addr)</code></small></p>
   </section>
 
   <section>
@@ -295,6 +344,7 @@ def fire-and-forget [mise_task: string] {
                 $"<pre id=\"jobs-fragment\"><code>(html-esc $out.stdout)</code></pre>"
             }
         }
+        ["GET", "/api/events-feed"]   => { events-feed-render }
         ["GET", "/api/snapshots"]     => {
             # Live provider snapshot list (Hetzner or Vultr depending on $VM_PROVIDER).
             let provider = ($env.VM_PROVIDER? | default "")

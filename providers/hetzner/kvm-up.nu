@@ -11,4 +11,4 @@ if $probe.exit_code == 0 {
 }
 
 let provisioned_ip = (^fnox exec --if-missing ignore -- hcloud server ip $env.SERVER_NAME | str trim)
-nu state/append.nu provisioned --label $env.SERVER_NAME --flavor kvm --ip $provisioned_ip
+nu state/append.nu provisioned --label $env.SERVER_NAME --flavor kvm --sku $env.SERVER_TYPE --ip $provisioned_ip

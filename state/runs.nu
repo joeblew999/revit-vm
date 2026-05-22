@@ -43,7 +43,7 @@ def derive_runs [events: list] {
                     started_at: $e.ts,
                     stopped_at: null,
                     duration_hr: null,
-                    sku: ($e.flavor? | default ($e.plan? | default "")),
+                    sku: ($e.sku? | default ($e.plan? | default ($e.flavor? | default ""))),
                     region: ($e.region? | default ""),
                     started_from: $e.action,
                     snapshot_id: ($e.snapshot_id? | default null),

@@ -120,8 +120,27 @@ run = "nu state/runs.nu --json"
 # wrappers so users get a familiar `mise run ...` UX.
 
 [tasks."up"]
-description = "Bring the system up: pitchfork starts xs + gui, then prints where to go. Idempotent — 'already running' is fine."
+description = "Bring the system up: pitchfork starts xs + gui, then prints where to go. Idempotent — 'already running' is fine. Warns if HTTP_NU_ADDR or XS_ADDR are held by another process."
 run = '''
+# Warn early if the bound ports are taken by something OTHER than our
+# pitchfork daemons. Saves a confusing "daemon errored" trail.
+GUI_PORT="${HTTP_NU_ADDR##*:}"
+XS_PORT="${XS_ADDR##*:}"
+for p in "$GUI_PORT" "$XS_PORT"; do
+  if lsof -ti "tcp:$p" -sTCP:LISTEN >/dev/null 2>&1; then
+    # Allowed: a process owned by our pitchfork daemon. Detect that by
+    # asking pitchfork what's running. If it's already in pitchfork list,
+    # the `pitchfork start` below will just say "already running".
+    OWNER=$(lsof -ti "tcp:$p" -sTCP:LISTEN | head -1)
+    PNAME=$(ps -p "$OWNER" -o comm= 2>/dev/null | tr -d ' ')
+    case "$PNAME" in
+      http-nu|xs|*pitchfork*) ;;
+      *) echo "  ⚠  port $p is held by pid $OWNER ($PNAME) — gui/xs will fail to bind" >&2
+         echo "     override in mise.local.toml: HTTP_NU_ADDR=\"127.0.0.1:<free-port>\"" >&2
+         ;;
+    esac
+  fi
+done
 pitchfork start xs gui || true
 echo ""
 echo "  GUI  →  http://$HTTP_NU_ADDR"

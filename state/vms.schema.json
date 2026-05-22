@@ -31,9 +31,10 @@
       "properties": {
         "action": {"const": "provisioned"},
         "flavor": {"type": "string", "enum": ["qemu", "kvm"], "description": "dockur virtualization mode. qemu = TCG (Hetzner Cloud), kvm = nested virt (Hetzner Dedicated, Vultr Bare Metal)."},
+        "sku": {"type": "string", "description": "Provider SKU for cost attribution: Hetzner SERVER_TYPE (e.g. cpx42), Vultr plan (e.g. vbm-4c-32gb). Joins to state/costs.jsonl on sku."},
         "ip": {"type": "string", "description": "Public IPv4. Optional on Vultr because provisioning is async and the IP isn't assigned at create-time."},
         "region": {"type": "string", "description": "Vultr only."},
-        "plan": {"type": "string", "description": "Vultr only."}
+        "plan": {"type": "string", "description": "Vultr only — legacy, prefer sku."}
       },
       "required": ["flavor"],
       "additionalProperties": false,

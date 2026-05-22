@@ -41,15 +41,17 @@ def write_event [event: record] {
 def "main provisioned" [
     --label: string,                 # VM identity (SERVER_NAME / VULTR_LABEL)
     --flavor: string,                # "qemu" | "kvm"
+    --sku: string = "",              # provider-side SKU (Hetzner SERVER_TYPE e.g. cpx42; Vultr plan e.g. vbm-4c-32gb). Used for cost attribution.
     --ip: string = "",               # public IPv4 if known (Vultr is async, may be empty)
     --region: string = "",           # Vultr only
-    --plan: string = "",             # Vultr only
+    --plan: string = "",             # Vultr only (legacy — superseded by --sku)
 ] {
     if ($label | is-empty)  { print -e "--label required";  exit 2 }
     if ($flavor | is-empty) { print -e "--flavor required"; exit 2 }
     if $flavor not-in ["qemu", "kvm"] { print -e $"--flavor must be qemu|kvm \(got ($flavor)\)"; exit 2 }
 
     mut e = {action: "provisioned", label: $label, flavor: $flavor}
+    if ($sku | is-not-empty)    { $e = ($e | upsert sku $sku) }
     if ($ip | is-not-empty)     { $e = ($e | upsert ip $ip) }
     if ($region | is-not-empty) { $e = ($e | upsert region $region) }
     if ($plan | is-not-empty)   { $e = ($e | upsert plan $plan) }
