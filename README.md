@@ -1,5 +1,13 @@
 # vm-servers
 
+> ⚠️ **Superseded by [vm-uncloud](https://github.com/joeblew999/vm-uncloud).**
+> Hetzner deployments are consolidating onto one tool (uncloud). The Windows
+> desktop now runs there as the `windows` recipe on a dedicated, teardownable
+> node (`mise run win:up` / `win:deploy` / `win:down`), with the RDP/viewer
+> helpers and a web status board ported over. This repo stays as the reference
+> for the bespoke lifecycle + the Vultr-BM/KVM path (a future vm-uncloud node
+> class) until that migration completes.
+
 **The recommended way to run this is the browser GUI.** It surfaces every system function (start, stop, snapshot, status, run history, cost ledger, live event bus) as buttons and live-updating tables. The CLI and the MCP/AI driver call the exact same mise tasks underneath — they're alternate surfaces, not parallel implementations.
 
 Built on [dockur/windows](https://github.com/dockur/windows) (auto-downloads Windows ISO + runs unattended setup) on top of Hetzner Cloud (TCG, cheap) or Vultr Bare Metal (KVM, fast). Every tool installs via mise — no compilers, no curl-piped installers. Cross-platform: lifecycle + RDP layer dispatch on `$nu.os-info.name` (macOS via Homebrew + `open`; Linux via xfreerdp/remmina + `xdg-open`; Windows via the built-in `mstsc.exe`). Generic — any Windows software fits. Sibling [vm-software](https://github.com/joeblew999/vm-software) holds per-app install recipes.
