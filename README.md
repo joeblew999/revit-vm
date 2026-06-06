@@ -1,12 +1,15 @@
 # vm-servers
 
-> ⚠️ **Superseded by [vm-uncloud](https://github.com/joeblew999/vm-uncloud).**
-> Hetzner deployments are consolidating onto one tool (uncloud). The Windows
-> desktop now runs there as the `windows` recipe on a dedicated, teardownable
-> node (`mise run win:up` / `win:deploy` / `win:down`), with the RDP/viewer
-> helpers and a web status board ported over. This repo stays as the reference
-> for the bespoke lifecycle + the Vultr-BM/KVM path (a future vm-uncloud node
-> class) until that migration completes.
+> ⚠️ **Superseded by [vm-uncloud](https://github.com/joeblew999/vm-uncloud) — safe to archive.**
+> All capabilities have been ported to vm-uncloud (one tool: uncloud): the
+> Windows desktop (`windows`/`windows-kvm` recipes on dedicated teardownable
+> nodes — `win:*` / `win-kvm:*`), RDP/viewer helpers, the web GUI (status +
+> actions), the MCP server + `ai:ask`, the cost ledger, and the R2 snapshot
+> transit. The live `windows-vm` was retired (snapshotted + destroyed). The
+> Vultr-BM/KVM + R2 paths are ported but **unverified** (need a Vultr key + R2 +
+> a live run) — this repo remains the working reference for them until that
+> first live run confirms the port. Recommend **Archive** (not Delete) so that
+> reference + the issue history survive.
 
 **The recommended way to run this is the browser GUI.** It surfaces every system function (start, stop, snapshot, status, run history, cost ledger, live event bus) as buttons and live-updating tables. The CLI and the MCP/AI driver call the exact same mise tasks underneath — they're alternate surfaces, not parallel implementations.
 
